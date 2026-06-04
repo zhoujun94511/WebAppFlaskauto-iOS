@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="200" viewBox="0 0 120 200" fill="none" role="img" aria-label="No stream">
+  <!-- Empty-state glyph for the no-stream device screen: a muted device with a
+       "press play to start the stream" triangle. Colours read on the dark
+       screen-wrap in both themes. The wording lives in the i18n text beside it. -->
+  <rect x="22" y="10" width="76" height="180" rx="16" stroke="#5b6b82" stroke-width="4"/>
+  <rect x="50" y="20" width="20" height="5" rx="2.5" fill="#5b6b82"/>
+  <path d="M52 86 L52 114 L76 100 Z" stroke="#5b6b82" stroke-width="4" stroke-linejoin="round" fill="none"/>
+</svg>

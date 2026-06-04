@@ -1,0 +1,375 @@
+:root {
+  color-scheme: dark;
+  /* Deep slate base (Android-aligned: #020617 → #0f172a → #111827). */
+  --bg: #0b1222;
+  --bg-glow-1: rgba(79, 70, 229, 0.30);
+  --bg-glow-2: rgba(37, 99, 235, 0.22);
+  --panel: rgba(15, 23, 42, 0.78);
+  --panel-solid: #131c30;
+  --panel-2: #1e293b;
+  --surface-1: rgba(30, 41, 59, 0.72);
+  --surface-2: rgba(30, 41, 59, 0.5);
+  --inset: #060b18;
+  --border: rgba(148, 163, 184, 0.18);
+  --border-strong: rgba(148, 163, 184, 0.32);
+  --text: #e2e8f0;
+  --text-strong: #f8fafc;
+  --muted: #94a3b8;
+  /* Blue-leaning accent (Android: blue #3b82f6 primary + indigo #6366f1). */
+  --primary: #3b82f6;
+  --primary-2: #6366f1;
+  --primary-fg: #fff;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --radius: 14px;
+  --shadow: 0 24px 56px rgba(0, 0, 0, 0.46);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.28);
+  --nav-w: 72px;
+}
+
+/* Light theme (toggled via <html data-theme="light">) */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef2f8;
+  --bg-glow-1: rgba(99, 102, 241, 0.10);
+  --bg-glow-2: rgba(56, 189, 248, 0.08);
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-solid: #ffffff;
+  --panel-2: #eef2f7;
+  --surface-1: rgba(241, 245, 249, 0.9);
+  --surface-2: rgba(241, 245, 249, 0.7);
+  --text-strong: #0b1220;
+  --inset: #f1f5f9;
+  --border: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --text: #0f172a;
+  --muted: #5b6b82;
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  --shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.08);
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  background:
+    radial-gradient(circle at top left, var(--bg-glow-1), transparent 30%),
+    radial-gradient(circle at top right, var(--bg-glow-2), transparent 24%),
+    linear-gradient(160deg, #020617 0%, #0f172a 44%, #111827 100%);
+  background-attachment: fixed;
+}
+[data-theme="light"] body {
+  background:
+    radial-gradient(circle at top left, var(--bg-glow-1), transparent 30%),
+    radial-gradient(circle at top right, var(--bg-glow-2), transparent 24%),
+    var(--bg);
+}
+
+/* ── buttons ─────────────────────────────────────────────── */
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 6px 13px;
+  /* Touch target: keep every button ≥40px tall (Apple HIG ≥44 / Material ≥48). */
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* Never wrap a label one-glyph-per-line when the button gets squeezed in a
+     flex row (the recurring CJK vertical-text bug). */
+  white-space: nowrap;
+  transition: border-color .15s, background .15s, transform .05s, box-shadow .15s;
+}
+button:hover:not(:disabled) { border-color: var(--primary-2); background: rgba(99, 102, 241, 0.12); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Visible keyboard focus (WCAG 2.4.7) — buttons/links/controls had none. */
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+button.primary {
+  background: linear-gradient(180deg, var(--primary-2), var(--primary));
+  color: var(--primary-fg);
+  border-color: transparent;
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.07); }
+button.danger { background: rgba(248, 113, 113, 0.12); color: #fca5a5; border-color: rgba(248, 113, 113, 0.4); }
+button.danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.2); border-color: var(--danger); }
+
+input, select {
+  font: inherit;
+  background: var(--inset);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 7px 11px;
+  min-height: 40px;
+}
+input::placeholder { color: #5b6b82; }
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+select option { background: var(--panel-solid); color: var(--text); }
+a { color: var(--primary-2); }
+
+/* ── layout ──────────────────────────────────────────────── */
+.app { min-height: 100%; padding: 18px 24px 40px; max-width: 1320px; margin: 0 auto; }
+.page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.page-head h1 { font-size: 1.2rem; margin: 0; font-weight: 650; letter-spacing: .2px; }
+.row { display: flex; gap: 10px; align-items: center; }
+.muted { color: var(--muted); }
+
+/* ── pills / badges (with status dot) ────────────────────── */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--muted); background: rgba(148,163,184,.08);
+}
+.pill::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9;
+}
+.pill.on { background: rgba(52, 211, 153, 0.12); color: #6ee7b7; border-color: rgba(52, 211, 153, 0.32); }
+.pill.off { background: rgba(248, 113, 113, 0.12); color: #fca5a5; border-color: rgba(248, 113, 113, 0.32); }
+.pill.warn { background: rgba(251, 191, 36, 0.12); color: #fcd34d; border-color: rgba(251, 191, 36, 0.32); }
+
+/* ── banners ─────────────────────────────────────────────── */
+.banner { padding: 9px 13px; border-radius: 10px; margin-bottom: 12px; font-size: 0.86rem; }
+.banner.warn { background: rgba(251, 191, 36, 0.1); color: #fcd34d; border: 1px solid rgba(251, 191, 36, 0.28); }
+.banner.err { background: rgba(248, 113, 113, 0.1); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.3); }
+
+/* ── cards / panels ──────────────────────────────────────── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 15px;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+.card strong { font-weight: 650; letter-spacing: .2px; }
+.card .block { margin-top: 13px; display: flex; flex-direction: column; gap: 6px; }
+.card label.muted { font-size: 0.74rem; text-transform: uppercase; letter-spacing: .5px; }
+
+.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+
+/* Device stage — Android-style 3 columns: info/actions | screen | panels. */
+/* The control panel is hidden by default (toggled by the device-card "更多"
+   button): the stage is info column + centered device. When opened it docks as a
+   third column and the device recenters — no overlay, no page-shift. */
+.stage { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
+.stage.with-drawer { grid-template-columns: 300px minmax(0, 1fr) 380px; }
+@media (max-width: 980px) { .stage, .stage.with-drawer { grid-template-columns: 1fr; } }
+.stage-left { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* On the wide (multi-column) layout, pin the info column and let IT scroll
+   internally instead of stretching the whole page — the long device-info card
+   (+ reservation + quick actions) was forcing the single-device stage to scroll
+   even on big screens. On the stacked mobile layout (≤980px) it scrolls with the
+   page as normal. */
+@media (min-width: 981px) {
+  .stage-left {
+    position: sticky; top: 16px; align-self: start;
+    max-height: calc(100vh - 240px); overflow-y: auto; overflow-x: hidden;
+    scrollbar-gutter: stable;
+  }
+}
+
+/* Single-device center card (header chip · screen · action toolbar) — mirrors
+   the Android DeviceCard. The card hugs the device aspect ratio and centers. */
+.device-card {
+  position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+  width: 100%; margin: 0 auto;
+  max-width: min(100%, calc((100vh - 250px) * var(--card-aspect, 0.49)));
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(8px);
+  transition: border-color .25s ease, box-shadow .25s ease;
+}
+/* Live (streaming) state: a soft pulsing blue halo around the card — mirrors
+   Android's device-card-glow. The glow is the card's OWN box-shadow (not a ::after
+   pseudo) so the card's `overflow: hidden` doesn't clip it. Reads best on dark. */
+.device-card.live {
+  border-color: rgba(59, 130, 246, 0.45);
+  animation: device-card-glow 2.6s ease-in-out infinite;
+}
+@keyframes device-card-glow {
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 24px 2px rgba(59, 130, 246, 0.12); }
+  50%      { box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.45), 0 0 34px 6px rgba(59, 130, 246, 0.22); }
+}
+/* Light mode: the bright #3b82f6 glow washes out on a white card. Use Android's
+   deeper light-theme blue (#2563eb / rgb(37,99,235)) so the halo reads crisply. */
+[data-theme="light"] .device-card.live {
+  border-color: rgba(37, 99, 235, 0.55);
+  animation-name: device-card-glow-light;
+}
+@keyframes device-card-glow-light {
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.30), 0 0 22px 2px rgba(37, 99, 235, 0.14); }
+  50%      { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.52), 0 0 30px 5px rgba(37, 99, 235, 0.22); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-card.live { animation: none; box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px 3px rgba(59, 130, 246, 0.16); }
+  [data-theme="light"] .device-card.live { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.45), 0 0 24px 3px rgba(37, 99, 235, 0.18); }
+}
+.device-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 14px; border-bottom: 1px solid var(--border);
+}
+.device-card-title { font-weight: 650; font-size: 0.9rem; letter-spacing: .2px; }
+.device-card-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  color: var(--muted); background: rgba(148, 163, 184, 0.1); border: 1px solid var(--border-strong);
+}
+.device-card-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.device-card-chip.on { color: #6ee7b7; background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.32); }
+.device-card-chip.off { color: #fcd34d; background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.32); }
+/* Inside the card the screen is frameless — the card provides the chrome. */
+.device-card .screen-wrap { border: none; border-radius: 0; box-shadow: none; min-height: 0; }
+.device-card-actions {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-top: 1px solid var(--border);
+}
+.card-action { min-height: 36px; width: 42px; padding: 0; }
+.card-action svg { width: 18px; height: 18px; }
+.card-action-spacer { flex: 1; }
+.card-action.active { color: var(--primary-fg); background: linear-gradient(180deg, var(--primary-2), var(--primary)); border-color: transparent; }
+
+/* ── app shell: left nav rail + sticky header + scrollable main ──── */
+.shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-height: 100vh; }
+.shell-main { display: flex; flex-direction: column; min-width: 0; }
+.shell-content { flex: 1; padding: 18px 24px 40px; max-width: 1360px; width: 100%; margin: 0 auto; }
+
+.nav-rail {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 0; width: var(--nav-w);
+  background: var(--panel); border-right: 1px solid var(--border); backdrop-filter: blur(10px);
+}
+.nav-rail .nav-brand { width: 34px; height: 34px; border-radius: 9px; margin-bottom: 10px; }
+.nav-item {
+  position: relative; width: 56px; min-height: 48px; border-radius: 12px;
+  /* icon stacked ABOVE the label (column), so the label reads horizontally
+     instead of wrapping one glyph per line in a too-narrow row. */
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  padding: 6px 2px;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.nav-item svg { width: 22px; height: 22px; }
+.nav-item:hover { color: var(--text); background: var(--surface-2); }
+.nav-item.active { color: var(--text-strong); background: rgba(59, 130, 246, 0.16); border-color: rgba(59,130,246,.34); }
+.nav-item.active::before {
+  content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 22px; border-radius: 2px; background: var(--primary);
+}
+.nav-label { font-size: 0.62rem; line-height: 1; white-space: nowrap; }
+.nav-spacer { flex: 1; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 24px; background: var(--panel); /* theme-aware (was a hardcoded dark slate that showed as a gray band in light mode) */
+  border-bottom: 1px solid var(--border); backdrop-filter: blur(10px);
+}
+@media (max-width: 760px) { .shell { grid-template-columns: 56px minmax(0,1fr); } .shell-content { padding: 14px; } }
+
+/* Unified topbar controls — one pill family (matches the theme/language pills):
+   40px tall, fully-rounded, --panel surface, --border-strong outline. */
+.topbar-actions { gap: 8px; }
+.topbar-actions .ghost {
+  border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--panel); color: var(--muted); padding: 6px 14px;
+}
+.topbar-actions .ghost:hover:not(:disabled) { color: var(--text); border-color: var(--primary-2); background: var(--panel); }
+.topbar-actions .ghost svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.topbar-sep { width: 1px; align-self: stretch; margin: 6px 2px; background: var(--border); }
+/* Segmented view switch — one pill track, raised active segment. */
+.seg {
+  display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 3px;
+  border-radius: 999px; border: 1px solid var(--border-strong); background: var(--panel);
+}
+.seg-btn {
+  min-height: 0; height: 100%; border: none; background: transparent; color: var(--muted);
+  border-radius: 999px; padding: 0 13px; gap: 6px; font-size: 0.86rem;
+}
+.seg-btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.seg-btn:hover:not(.active) { color: var(--text); background: transparent; }
+.seg-btn.active { background: rgba(59, 130, 246, 0.16); color: var(--text-strong); }
+.topbar-actions svg.spin { animation: topbar-spin 0.8s linear infinite; transform-origin: center; }
+@keyframes topbar-spin { to { transform: rotate(360deg); } }
+
+/* ── QuickInfo device card (mirrors the Android QuickInfoCard) ───── */
+.quick-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.quick-card-head .qc-model { font-size: 1.05rem; font-weight: 680; color: var(--text-strong); }
+.quick-card-head .qc-sub { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+.metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 14px; }
+.metric-tile {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+}
+.metric-ring { width: 44px; height: 44px; flex: 0 0 auto; }
+.metric-ring text { fill: var(--text-strong); font-size: 11px; font-weight: 700; }
+.metric-meta { min-width: 0; }
+.metric-meta .mm-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.metric-meta .mm-value { font-size: 0.84rem; font-weight: 600; }
+.ring-ok { color: var(--ok); } .ring-warn { color: var(--warn); } .ring-danger { color: var(--danger); }
+
+.info-table { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; margin: 0; }
+.info-table dt { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.info-table dd { margin: 0; font-size: 0.82rem; text-align: right; word-break: break-word; }
+.info-table dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+.qc-chip {
+  font-size: 0.68rem; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--muted); background: rgba(148,163,184,.1);
+}
+.qc-chip.conn-usb { color: #93c5fd; border-color: rgba(59,130,246,.4); background: rgba(59,130,246,.12); }
+
+/* ── scrollbars ──────────────────────────────────────────── */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.25); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ── light-theme contrast fixes ──────────────────────────────
+   Pills / banners / danger button use pastel text tuned for the dark
+   background; on the light theme that text sat on a near-white tint at
+   ~1.7:1 (WCAG fails). Re-pair them with dark text on a light tint. */
+[data-theme="light"] .pill.on   { color: #067647; background: #ecfdf3; border-color: #a6f4c5; }
+[data-theme="light"] .pill.off  { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+[data-theme="light"] .pill.warn { color: #b54708; background: #fffaeb; border-color: #fedf89; }
+[data-theme="light"] .banner.warn { color: #b54708; background: #fffaeb; border-color: #fedf89; }
+[data-theme="light"] .banner.err  { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+[data-theme="light"] button.danger { color: #b42318; background: #fef3f2; border-color: #fda29b; }
+[data-theme="light"] button.danger:hover:not(:disabled) { background: #fee4e2; border-color: #f97066; }
+
+/* ── responsive: phones ──────────────────────────────────────
+   The top bar (brand + user/logout/language/theme) overflowed narrow
+   viewports and forced horizontal scroll. Let it wrap and tighten gutters. */
+@media (max-width: 600px) {
+  .app { padding: 12px 14px 32px; }
+  .topbar { flex-wrap: wrap; gap: 10px; row-gap: 12px; }
+  .topbar > .row { flex-wrap: wrap; justify-content: flex-end; }
+  .page-head { flex-wrap: wrap; gap: 10px; }
+}
+
+/* Respect users who ask for less motion (vestibular safety). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
