@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <title>iOS Remote — WebAppFlaskauto-iOS</title>
+    <!-- Static pre-mount fallback (matches locales/en/ui.json's `app.title`).
+         Once Vue boots, useUiI18n._syncTitle() overwrites this with the
+         active locale's value (zh-CN / zh-TW / en). -->
+    <title>WebAppFlaskauto-iOS — Bringing the World Closer to You!</title>
   </head>
   <body>
     <div id="app"></div>

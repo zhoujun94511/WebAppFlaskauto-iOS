@@ -285,6 +285,13 @@ class IOSAdapter:
             time.sleep(1.0)
 
     def disconnect(self, udid: str) -> None:
+        # Close any WebRTC peer connections for this device FIRST. That cascades
+        # into track.stop() → provider.stop() which sets _stopping=True on the
+        # MJPEG reader, so the in-flight chunked-stream read that's about to die
+        # when we tear down port forwards below is recognized as an intentional
+        # shutdown (DEBUG log) instead of a WinError 10054 traceback (WARN).
+        with suppress(Exception):
+            self.webrtc.stop_device(udid)
         self.stop_stream(udid)
         with self._lock:
             controller = state.controllers.pop(udid, None)

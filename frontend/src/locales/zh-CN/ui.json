@@ -8,7 +8,7 @@
     "subtitle": "实时镜像 · 远程操控 · 高效协作",
     "logout": "登出",
     "admin": "管理",
-    "name": "iOS 远程控制"
+    "name": "WebAppFlaskauto-iOS"
   },
   "roles": {
     "user": "普通用户",
@@ -58,7 +58,7 @@
     "connect": "连接",
     "disconnect": "断开",
     "open": "打开 / 控制",
-    "confirmDisconnect": "断开该设备？将停止 WebDriverAgent。"
+    "confirmDisconnect": "断开该设备？"
   },
   "toast": {
     "clipPushed": "已推送到设备剪贴板",
@@ -87,13 +87,12 @@
     "back": "← 返回",
     "connect": "连接",
     "connecting": "连接中…",
-    "checkWda": "检查 WDA",
     "disconnect": "断开",
     "disconnecting": "断开中…",
     "wdaRunning": "运行中",
     "wdaDown": "未运行",
-    "connectingBanner": "连接中…正在启动 go-ios 用户态隧道并拉起 WebDriverAgent（免管理员）。首次启动约需 10–20 秒。",
-    "connectFailed": "连接 / 启动 WebDriverAgent 失败",
+    "connectingBanner": "连接中…首次启动约需 10–20 秒。",
+    "connectFailed": "连接失败",
     "disconnectFailed": "断开失败",
     "close": "关闭",
     "switchDevice": "切换设备"
@@ -107,8 +106,8 @@
     "stop": "停止",
     "fps": "帧率",
     "apply": "应用",
-    "providerMjpeg": "WDA MJPEG",
-    "providerScreenshot": "WDA 截图",
+    "providerMjpeg": "MJPEG",
+    "providerScreenshot": "截图轮询",
     "stats": "当前：{provider} · 目标 {target} fps · 实时 {live} fps",
     "connectFirst": "请先连接设备",
     "noFrame": "暂无画面 —— 请启动视频流。"
@@ -139,8 +138,8 @@
     "clipPlaceholder": "文本 ↔ 设备剪贴板",
     "push": "推送",
     "pull": "拉取",
-    "clipHint": "推送随时可用；拉取仅在 WebDriverAgent 处于前台时可读（iOS 限制）。",
-    "clipEmpty": "剪贴板为空（把 WDA 切到前台再读）。",
+    "clipHint": "推送随时可用；拉取仅在代理 App 处于前台时可读（iOS 限制）。",
+    "clipEmpty": "剪贴板为空（请把代理 App 切到前台再读）。",
     "screenshot": "截图",
     "download": "下载",
     "more": "更多",

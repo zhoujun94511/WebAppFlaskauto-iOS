@@ -8,7 +8,7 @@
     "subtitle": "Real-time mirror · remote control · efficient collaboration",
     "logout": "Logout",
     "admin": "Admin",
-    "name": "iOS Remote Control"
+    "name": "WebAppFlaskauto-iOS"
   },
   "roles": {
     "user": "User",
@@ -58,7 +58,7 @@
     "connect": "Connect",
     "disconnect": "Disconnect",
     "open": "Open / Control",
-    "confirmDisconnect": "Disconnect this device? This stops WebDriverAgent."
+    "confirmDisconnect": "Disconnect this device?"
   },
   "toast": {
     "clipPushed": "Pushed to device clipboard",
@@ -87,13 +87,12 @@
     "back": "← Back",
     "connect": "Connect",
     "connecting": "Connecting…",
-    "checkWda": "Check WDA",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "wdaRunning": "running",
     "wdaDown": "Down",
-    "connectingBanner": "Connecting… starting the go-ios userspace tunnel and launching WebDriverAgent (no admin). First launch can take ~10–20s.",
-    "connectFailed": "Failed to connect / launch WebDriverAgent",
+    "connectingBanner": "Connecting… first launch can take ~10–20s.",
+    "connectFailed": "Connection failed",
     "disconnectFailed": "Failed to disconnect",
     "close": "Close",
     "switchDevice": "Switch device"
@@ -107,8 +106,8 @@
     "stop": "Stop",
     "fps": "FPS",
     "apply": "Apply",
-    "providerMjpeg": "WDA MJPEG",
-    "providerScreenshot": "WDA Screenshot",
+    "providerMjpeg": "MJPEG",
+    "providerScreenshot": "Screenshot polling",
     "stats": "Active: {provider} · target {target} fps · live {live} fps",
     "connectFirst": "Connect the device first",
     "noFrame": "No frame yet — start the stream."
@@ -139,8 +138,8 @@
     "clipPlaceholder": "Text ↔ Device Clipboard",
     "push": "Push",
     "pull": "Pull",
-    "clipHint": "Push works anytime. Pull only reads when WebDriverAgent is foreground (iOS limit).",
-    "clipEmpty": "Clipboard empty (bring WDA to foreground to read).",
+    "clipHint": "Push works anytime. Pull only reads when the agent app is in the foreground (iOS limit).",
+    "clipEmpty": "Clipboard empty (bring the agent app to the foreground to read).",
     "screenshot": "Screenshot",
     "download": "Download",
     "more": "More",

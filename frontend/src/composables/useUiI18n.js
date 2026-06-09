@@ -51,13 +51,29 @@ function _syncHtmlLang(v) {
     /* ignore (SSR / no DOM) */
   }
 }
+// Keep the browser tab title (<title>) in sync with the active locale. The
+// hardcoded value in index.html is only the pre-mount fallback — once Vue is
+// up we own it. Reads `app.title` from the current locale, with English as the
+// final fallback so a missing key never wipes the tab title.
+function _syncTitle(v) {
+  try {
+    if (typeof document === "undefined") return;
+    const msgs = MESSAGES[v] || MESSAGES.en;
+    const title = _getPath(msgs, "app.title") ?? _getPath(MESSAGES.en, "app.title");
+    if (title) document.title = String(title);
+  } catch {
+    /* ignore (SSR / no DOM) */
+  }
+}
 _syncHtmlLang(locale.value);
+_syncTitle(locale.value);
 
 export function useUiI18n() {
   function setLocale(v) {
     if (!AVAILABLE.includes(v)) return;
     locale.value = v;
     _syncHtmlLang(v);
+    _syncTitle(v);
     try {
       window.localStorage.setItem(KEY, v);
     } catch {
