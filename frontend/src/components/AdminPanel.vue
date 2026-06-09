@@ -57,8 +57,12 @@
             </td>
             <td><button class="mini" :disabled="u.role === 'super_admin'" @click="toggleActive(u)">{{ u.is_active ? t("admin.yes") : t("admin.no") }}</button></td>
             <td>
-              <button v-if="canDelete(u)" class="mini danger" @click="remove(u)">{{ t("admin.del") }}</button>
-              <span v-else class="muted" style="font-size: 0.72rem">—</span>
+              <div class="row-actions">
+                <button v-if="canEditAccount(u)" class="mini" @click="editEmail(u)">{{ t("admin.editEmail") }}</button>
+                <button v-if="canEditAccount(u)" class="mini" @click="resetPassword(u)">{{ t("admin.resetPassword") }}</button>
+                <button v-if="canDelete(u)" class="mini danger" @click="remove(u)">{{ t("admin.del") }}</button>
+                <span v-if="!canEditAccount(u) && !canDelete(u)" class="muted" style="font-size: 0.72rem">—</span>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -98,6 +102,7 @@ import { useAuth } from "../composables/useAuth";
 import { useUiI18n } from "../composables/useUiI18n";
 import { useConfirm } from "../composables/useConfirm";
 import { useToast } from "../composables/useToast";
+import { useValidators } from "../composables/useValidators";
 import { useDevices } from "../composables/useDevices";
 import SelectMenu from "./SelectMenu.vue";
 
@@ -118,8 +123,13 @@ const rankOptions = computed(() => [
 const canEditRole = (u) =>
   isSuperAdmin.value && u.id !== meId.value && u.role !== "super_admin";
 const canDelete = (u) => u.id !== meId.value && u.role !== "super_admin";
-const { ask } = useConfirm();
+// Email / password edits — match Android: allowed on anyone except super_admin
+// (including the actor's own row, since the backend permits it and there is no
+// separate self-service settings page).
+const canEditAccount = (u) => u.role !== "super_admin";
+const { ask, askPrompt } = useConfirm();
 const { push: toast } = useToast();
+const { validateEmail, validatePassword } = useValidators();
 const { devices, refresh: refreshDevices } = useDevices();
 
 const tab = ref("users");
@@ -231,6 +241,44 @@ async function remove(u) {
     error.value = e.message;
   }
 }
+async function editEmail(u) {
+  error.value = "";
+  const email = await askPrompt({
+    message: t("admin.newEmailPrompt", { name: u.username }),
+    value: u.email,
+    placeholder: t("admin.email"),
+  });
+  if (email == null) return; // cancel
+  const trimmed = String(email).trim();
+  if (!trimmed || trimmed === u.email) return;
+  const formErr = validateEmail(trimmed);
+  if (formErr) { error.value = formErr; return; }
+  try {
+    await authApi.updateUser(u.id, { email: trimmed });
+    toast(t("admin.emailUpdated", { name: u.username }));
+    await refresh();
+  } catch (e) {
+    error.value = e.message;
+  }
+}
+async function resetPassword(u) {
+  error.value = "";
+  const pw = await askPrompt({
+    message: t("admin.newPasswordPrompt", { name: u.username }),
+    password: true,
+    placeholder: t("admin.password"),
+  });
+  if (pw == null) return; // cancel
+  if (!pw) return;
+  const formErr = validatePassword(pw);
+  if (formErr) { error.value = formErr; return; }
+  try {
+    await authApi.updateUser(u.id, { password: pw });
+    toast(t("admin.passwordReset", { name: u.username }));
+  } catch (e) {
+    error.value = e.message;
+  }
+}
 
 onMounted(refresh);
 </script>
@@ -249,6 +297,7 @@ onMounted(refresh);
 .dev-cell { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mini { padding: 2px 8px; font-size: 0.72rem; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .block { margin-top: 12px; }
 .create-box {
   margin-top: 12px; padding: 12px; border: 1px solid var(--border);

@@ -119,7 +119,10 @@ const rtc = useWebRTC(props.udid);
 const ctrl = useControl(props.udid);
 
 const device = computed(() => devices.value.find((d) => d.udid === props.udid));
-const deviceName = computed(() => device.value?.name || props.udid.slice(0, 14));
+// Prefer the marketing name ("iPhone 15 Pro Max") over the lockdown DeviceName
+// (typically just "iPhone" if the user never renamed the device). Backend stamps
+// `marketing` onto every device in /api/devices via IOSDevice.to_dict().
+const deviceName = computed(() => device.value?.marketing || device.value?.name || props.udid.slice(0, 14));
 // Card hugs the device aspect ratio (w/h); fall back to a modern-phone portrait.
 const aspect = computed(() => {
   const w = device.value?.screen_width, h = device.value?.screen_height;

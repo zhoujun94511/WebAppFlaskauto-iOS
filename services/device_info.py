@@ -23,20 +23,7 @@ from utils.logging_setup import get_logger
 
 _log = get_logger(__name__)
 
-# Compact ProductType → marketing-name map (best-effort; falls back to the
-# identifier). Not exhaustive — Apple ships new identifiers constantly.
-_MARKETING = {
-    "iPhone17,5": "iPhone 16e", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus",
-    "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max",
-    "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max",
-    "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
-    "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max",
-    "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
-    "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max",
-    "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13",
-    "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12",
-    "iPhone13,3": "iPhone 12 Pro", "iPhone13,4": "iPhone 12 Pro Max",
-}
+from ios.device_marketing import marketing_name
 
 
 def _lockdown_values(udid: str, domain: Optional[str] = None) -> dict:
@@ -128,7 +115,7 @@ def collect(udid: str) -> dict:
         "udid": udid,
         "name": vals.get("DeviceName") or (dev.name if dev else ""),
         "product_type": product_type,
-        "marketing": _MARKETING.get(product_type, product_type),
+        "marketing": marketing_name(product_type),
         "ios_version": vals.get("ProductVersion") or (dev.ios_version if dev else ""),
         "build": vals.get("BuildVersion", ""),
         "model_number": vals.get("ModelNumber", ""),

@@ -37,3 +37,11 @@ desktop.ini
 
 # Claude workspace
 .claude/
+
+# iOS pairing identity — go-ios writes this on first pair; per-machine, never commit.
+*.plist
+
+# Large local-only iOS tooling resources (DDIs + go-ios CLI). Kept on the dev
+# machine but not in the repo — see README for setup notes.
+resources/devimages/
+resources/executable/

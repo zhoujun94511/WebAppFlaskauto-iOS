@@ -3,7 +3,7 @@
     <div v-for="d in devices" :key="d.udid" class="matrix-tile card">
       <div class="matrix-head">
         <div class="matrix-name">
-          <strong>{{ d.name || d.udid.slice(0, 12) }}</strong>
+          <strong>{{ d.marketing || d.name || d.udid.slice(0, 12) }}</strong>
           <span class="muted" style="font-size: 0.72rem">{{ d.product_type }} · iOS {{ d.ios_version }}</span>
         </div>
         <div class="row" style="gap: 6px">

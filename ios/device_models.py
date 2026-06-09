@@ -28,7 +28,14 @@ class IOSDevice:
     last_seen: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        # Stamp `marketing` derived from product_type so every list-view
+        # consumer (DeviceStage / DeviceMatrix / DeviceStrip) gets the friendly
+        # name (e.g. "iPhone 15 Pro Max") without each one re-fetching the
+        # /info detail endpoint. Late import keeps the dataclass import-light.
+        from ios.device_marketing import marketing_name
+        d = asdict(self)
+        d["marketing"] = marketing_name(self.product_type) if self.product_type else ""
+        return d
 
     def merge(self, other: "IOSDevice") -> None:
         """Update mutable fields from a freshly-scanned device, preserving

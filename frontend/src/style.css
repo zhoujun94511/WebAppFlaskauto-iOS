@@ -197,38 +197,58 @@ a { color: var(--primary-2); }
   border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(8px);
   transition: border-color .25s ease, box-shadow .25s ease;
 }
-/* Live (streaming) state: a soft pulsing blue halo around the *screen image*
-   only — mirrors Android's fix. The glow lives on .screen-img itself (not the
-   whole card) so it hugs the video: top at status bar, bottom at gesture bar,
-   left/right at the video edges. The card chrome (header title, footer button
-   row) sits OUTSIDE the halo because it isn't part of "the device". The glow
-   is applied as the element's OWN box-shadow so .screen-wrap's overflow:hidden
-   does not clip it (an ::after pseudo would be clipped). The base drop-shadow
-   `0 6px 24px rgba(0,0,0,0.5)` from DeviceScreen's scoped style is replicated
-   in every keyframe so the resting shadow is preserved during the animation. */
-.device-card.live .screen-img {
-  animation: device-card-glow 2.6s ease-in-out infinite;
+/* Live (streaming) state — two-layer halo, mirrors Android `.device-card.active`
+   + `.device-card.active .device-card-screen`:
+     LAYER 1 (static, on the CARD): blue-tinted border + 2px outer ring around
+             the whole card. Always-on while live; reads as "this card is the
+             selected/active device".
+     LAYER 2 (pulsing, on the SCREEN): tight crisp double-line that breathes
+             around the device screen area itself. Uses spread-only shadows
+             (no blur radius) so the ring is hard-edged like Android's, not
+             a fuzzy glow.
+   Card chrome (header title, footer button row) sits OUTSIDE the inner pulse
+   because the wrap occupies only the screen area between header and footer.
+   The pulse is painted on .screen-wrap itself — an element's own box-shadow
+   is painted OUTSIDE its border-box and is NEVER clipped by that element's
+   own `overflow: hidden` (overflow clips only descendants). Putting it on the
+   inner <video> instead — as an earlier attempt did — was wrong because then
+   the shadow IS a descendant of the wrap and DOES get clipped.
+   Card-level `overflow: hidden` would still clip the wrap's outward halo AND
+   the card's own outer 2px ring, so relax it whenever .live. */
+.device-card.live {
+  overflow: visible;
+  border-color: rgba(59, 130, 246, 0.7);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.22), var(--shadow);
+}
+.device-card.live .screen-wrap {
+  animation: device-card-glow 2.2s ease-in-out infinite;
 }
 @keyframes device-card-glow {
-  0%, 100% { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 24px 2px rgba(59, 130, 246, 0.12); }
-  50%      { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.45), 0 0 34px 6px rgba(59, 130, 246, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.16), 0 0 0 5px rgba(59, 130, 246, 0.02); }
+  50%      { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.32), 0 0 0 7px rgba(59, 130, 246, 0.08); }
 }
-/* Light mode: the bright #3b82f6 glow washes out on a white card. Use Android's
-   deeper light-theme blue (#2563eb / rgb(37,99,235)) so the halo reads crisply. */
-[data-theme="light"] .device-card.live .screen-img {
+/* Light mode: deeper blue (Android's `--primary-border` light value, #2563eb / rgb(37,99,235))
+   so the static outline + pulse both stay readable on a white card. */
+[data-theme="light"] .device-card.live {
+  border-color: rgba(37, 99, 235, 0.6);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12), var(--shadow);
+}
+[data-theme="light"] .device-card.live .screen-wrap {
   animation-name: device-card-glow-light;
 }
 @keyframes device-card-glow-light {
-  0%, 100% { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.30), 0 0 22px 2px rgba(37, 99, 235, 0.14); }
-  50%      { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.52), 0 0 30px 5px rgba(37, 99, 235, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.22), 0 0 0 5px rgba(37, 99, 235, 0.04); }
+  50%      { box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.40), 0 0 0 7px rgba(37, 99, 235, 0.10); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .device-card.live .screen-img { animation: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px 3px rgba(59, 130, 246, 0.16); }
-  [data-theme="light"] .device-card.live .screen-img { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.45), 0 0 24px 3px rgba(37, 99, 235, 0.18); }
+  .device-card.live .screen-wrap { animation: none; box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.24), 0 0 0 6px rgba(59, 130, 246, 0.05); }
+  [data-theme="light"] .device-card.live .screen-wrap { box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.32), 0 0 0 6px rgba(37, 99, 235, 0.07); }
 }
 .device-card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 9px 14px; border-bottom: 1px solid var(--border);
+  padding: 9px 14px;
+  /* No border-bottom — Android mirrors this: header sits flush above the
+     screen so the live halo + card border are the only chrome separators. */
 }
 .device-card-title { font-weight: 650; font-size: 0.9rem; letter-spacing: .2px; }
 .device-card-chip {
@@ -239,11 +259,30 @@ a { color: var(--primary-2); }
 .device-card-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .device-card-chip.on { color: #6ee7b7; background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.32); }
 .device-card-chip.off { color: #fcd34d; background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.32); }
-/* Inside the card the screen is frameless — the card provides the chrome. */
-.device-card .screen-wrap { border: none; border-radius: 0; box-shadow: none; min-height: 0; }
+/* Inside the card the screen is frameless — the card provides the chrome.
+   ALSO zero the wrap's padding and let it overflow: the .live glow is a
+   box-shadow on .screen-img (the video element); an ancestor with
+   overflow:hidden would clip that shadow, and a non-zero padding would push
+   the glow's inner ring away from the video edges. Both must be neutralized
+   here for the halo to actually hug the video (status-bar → gesture-bar,
+   left/right flush). DeviceScreen's scoped .screen-wrap keeps overflow:hidden
+   + padding for the standalone (grid-tile) use; we only relax it INSIDE
+   .device-card where the card owns the chrome.
+   SPECIFICITY: DeviceScreen.vue's scoped style compiles to
+   `.screen-wrap[data-v-xxxx]` — specificity (0,2,0). A plain
+   `.device-card .screen-wrap` is also (0,2,0); since Vue injects scoped
+   styles AFTER the global stylesheet, the scoped rule would WIN the tie and
+   re-impose padding:10px + overflow:hidden, clipping the halo. Chaining
+   `.device-card.device-card` lifts us to (0,3,0) so this override stays
+   authoritative without resorting to !important. */
+.device-card.device-card .screen-wrap {
+  border: none; border-radius: 0; box-shadow: none; min-height: 0;
+  padding: 0; overflow: visible;
+}
 .device-card-actions {
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 12px; border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  /* No border-top — mirrors Android: footer sits flush below the screen. */
 }
 .card-action { min-height: 36px; width: 42px; padding: 0; }
 .card-action svg { width: 18px; height: 18px; }

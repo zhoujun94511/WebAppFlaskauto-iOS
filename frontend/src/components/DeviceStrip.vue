@@ -10,11 +10,11 @@
       :class="{ active: d.udid === current }"
       role="tab"
       :aria-selected="d.udid === current"
-      :title="d.name || d.udid"
+      :title="d.marketing || d.name || d.udid"
       @click="d.udid !== current && $emit('select', d.udid)"
     >
       <span class="dot" :class="dotClass(d)" />
-      <span class="dlabel">{{ d.name || short(d.udid) }}</span>
+      <span class="dlabel">{{ d.marketing || d.name || short(d.udid) }}</span>
     </button>
   </div>
 </template>
