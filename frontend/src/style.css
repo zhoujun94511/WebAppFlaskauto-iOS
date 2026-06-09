@@ -197,30 +197,34 @@ a { color: var(--primary-2); }
   border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(8px);
   transition: border-color .25s ease, box-shadow .25s ease;
 }
-/* Live (streaming) state: a soft pulsing blue halo around the card — mirrors
-   Android's device-card-glow. The glow is the card's OWN box-shadow (not a ::after
-   pseudo) so the card's `overflow: hidden` doesn't clip it. Reads best on dark. */
-.device-card.live {
-  border-color: rgba(59, 130, 246, 0.45);
+/* Live (streaming) state: a soft pulsing blue halo around the *screen image*
+   only — mirrors Android's fix. The glow lives on .screen-img itself (not the
+   whole card) so it hugs the video: top at status bar, bottom at gesture bar,
+   left/right at the video edges. The card chrome (header title, footer button
+   row) sits OUTSIDE the halo because it isn't part of "the device". The glow
+   is applied as the element's OWN box-shadow so .screen-wrap's overflow:hidden
+   does not clip it (an ::after pseudo would be clipped). The base drop-shadow
+   `0 6px 24px rgba(0,0,0,0.5)` from DeviceScreen's scoped style is replicated
+   in every keyframe so the resting shadow is preserved during the animation. */
+.device-card.live .screen-img {
   animation: device-card-glow 2.6s ease-in-out infinite;
 }
 @keyframes device-card-glow {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 24px 2px rgba(59, 130, 246, 0.12); }
-  50%      { box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.45), 0 0 34px 6px rgba(59, 130, 246, 0.22); }
+  0%, 100% { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 24px 2px rgba(59, 130, 246, 0.12); }
+  50%      { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.45), 0 0 34px 6px rgba(59, 130, 246, 0.22); }
 }
 /* Light mode: the bright #3b82f6 glow washes out on a white card. Use Android's
    deeper light-theme blue (#2563eb / rgb(37,99,235)) so the halo reads crisply. */
-[data-theme="light"] .device-card.live {
-  border-color: rgba(37, 99, 235, 0.55);
+[data-theme="light"] .device-card.live .screen-img {
   animation-name: device-card-glow-light;
 }
 @keyframes device-card-glow-light {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.30), 0 0 22px 2px rgba(37, 99, 235, 0.14); }
-  50%      { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.52), 0 0 30px 5px rgba(37, 99, 235, 0.22); }
+  0%, 100% { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.30), 0 0 22px 2px rgba(37, 99, 235, 0.14); }
+  50%      { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.52), 0 0 30px 5px rgba(37, 99, 235, 0.22); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .device-card.live { animation: none; box-shadow: var(--shadow), 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px 3px rgba(59, 130, 246, 0.16); }
-  [data-theme="light"] .device-card.live { box-shadow: var(--shadow), 0 0 0 1px rgba(37, 99, 235, 0.45), 0 0 24px 3px rgba(37, 99, 235, 0.18); }
+  .device-card.live .screen-img { animation: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 26px 3px rgba(59, 130, 246, 0.16); }
+  [data-theme="light"] .device-card.live .screen-img { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(37, 99, 235, 0.45), 0 0 24px 3px rgba(37, 99, 235, 0.18); }
 }
 .device-card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
