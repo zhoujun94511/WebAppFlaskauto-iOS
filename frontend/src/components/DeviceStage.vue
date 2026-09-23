@@ -9,9 +9,11 @@
 
     <DeviceScreen
       :udid="udid"
-      :frame="useRtc ? '' : stream.frame.value"
-      :stream="useRtc ? rtc.stream.value : null"
-      :rtc-control="useRtc ? rtc.sendControl : null"
+      :frame="mode === 'jpeg' ? stream.frame.value : ''"
+      :stream="mode === 'webrtc' ? rtc.stream.value : null"
+      :hevc="mode === 'hevc'"
+      :rtc-control="mode === 'webrtc' ? rtc.sendControl : null"
+      :on-media="onMedia"
     />
 
     <footer class="device-card-actions">
@@ -38,13 +40,13 @@
       </button>
     </footer>
 
-    <p v-if="rtc.error.value || stream.error.value" class="banner err" style="margin: 0; border-radius: 0">
-      {{ rtc.error.value || stream.error.value }}
+    <p v-if="hevc.error.value || rtc.error.value || stream.error.value" class="banner err" style="margin: 0; border-radius: 0">
+      {{ hevc.error.value || rtc.error.value || stream.error.value }}
     </p>
 
     <!-- MJPEG fallback (Socket.IO) provider/fps knobs — only when WebRTC is off -->
     <StreamPanel
-      v-if="!useRtc"
+      v-if="mode === 'jpeg'"
       :running="stream.running.value"
       :connected="connected"
       :active-provider="stream.provider.value"
@@ -59,9 +61,10 @@
   <DeviceScreen
     v-else
     :udid="udid"
-    :frame="useRtc ? '' : stream.frame.value"
-    :stream="useRtc ? rtc.stream.value : null"
-    :rtc-control="useRtc ? rtc.sendControl : null"
+    :frame="mode === 'jpeg' ? stream.frame.value : ''"
+    :stream="mode === 'webrtc' ? rtc.stream.value : null"
+    :hevc="false"
+    :rtc-control="mode === 'webrtc' ? rtc.sendControl : null"
   />
 
   <!-- Floating D-pad — summoned from the footer navpad button. Teleported to
@@ -97,6 +100,7 @@ import DeviceScreen from "./DeviceScreen.vue";
 import StreamPanel from "./StreamPanel.vue";
 import { useStream } from "../composables/useStream";
 import { useWebRTC } from "../composables/useWebRTC";
+import { useHevcStream, browserSupportsHevc, iosSupportsHevc } from "../composables/useHevcStream";
 import { useDevices } from "../composables/useDevices";
 import { useControl } from "../composables/useControl";
 import { useUiI18n } from "../composables/useUiI18n";
@@ -111,12 +115,44 @@ const props = defineProps({
 });
 const emit = defineEmits(["toggle-more"]);
 
-const { devices, webrtcEnabled } = useDevices();
-const useRtc = webrtcEnabled; // reactive ref; chosen once health is known
+const { devices, webrtcEnabled, hevcAvailable } = useDevices();
 
 const stream = useStream(props.udid);
 const rtc = useWebRTC(props.udid);
+const hevc = useHevcStream(props.udid);
 const ctrl = useControl(props.udid);
+// "" until health + connect decide. Grid never uses HEVC.
+const mode = ref("");
+
+function onMedia(el) {
+  hevc.bind(el);
+}
+
+function useJpeg() {
+  mode.value = "jpeg";
+  if (!stream.running.value) stream.start("mjpeg");
+}
+
+function useWebRtc() {
+  mode.value = "webrtc";
+  rtc.start();
+}
+
+function leaveHevc(serverProvider) {
+  // Server already moved to MJPEG/screenshot: keep that socket stream unless
+  // WebRTC is on, in which case WebRTC owns the JPEG provider itself.
+  if (webrtcEnabled.value) {
+    stream.stop();
+    useWebRtc();
+    return;
+  }
+  if (serverProvider === "mjpeg" || serverProvider === "screenshot") {
+    mode.value = "jpeg";
+    return;
+  }
+  useJpeg();
+}
+hevc.setFallback(leaveHevc);
 
 const device = computed(() => devices.value.find((d) => d.udid === props.udid));
 // Prefer the marketing name ("iPhone 15 Pro Max") over the lockdown DeviceName
@@ -208,28 +244,57 @@ watch(dpadOpen, async (open) => {
   }
 });
 
-const live = computed(() => (useRtc.value ? rtc.running.value : stream.running.value));
-const chipText = computed(() =>
-  useRtc.value
-    ? (rtc.running.value ? t("stream.live") + " · WebRTC" : t("stream.connecting"))
-    : (stream.running.value ? t("stream.live") : t("stream.connecting")),
-);
+const live = computed(() => {
+  if (mode.value === "hevc") return hevc.running.value;
+  if (mode.value === "webrtc") return rtc.running.value;
+  return stream.running.value;
+});
+const chipText = computed(() => {
+  if (mode.value === "hevc") {
+    return hevc.running.value ? t("stream.live") + " · HEVC" : t("stream.connecting");
+  }
+  if (mode.value === "webrtc") {
+    return rtc.running.value ? t("stream.live") + " · WebRTC" : t("stream.connecting");
+  }
+  return stream.running.value ? t("stream.live") : t("stream.connecting");
+});
 
-// Once connected (WDA up), start whichever transport is enabled.
+async function pickTransport() {
+  if (!props.connected || mode.value) return;
+  // Single-device stage only. The grid stays on MJPEG/WebRTC.
+  const version = device.value?.ios_version || "";
+  if (!props.compact && hevcAvailable.value === true && iosSupportsHevc(version)) {
+    const ok = await browserSupportsHevc();
+    if (!props.connected || mode.value) return;
+    if (ok) {
+      mode.value = "hevc";
+      hevc.start();
+      return;
+    }
+  }
+  if (!props.compact && hevcAvailable.value === null) return;
+  if (webrtcEnabled.value) useWebRtc();
+  else useJpeg();
+}
+
 watch(
   () => props.connected,
   (isConnected) => {
-    if (!isConnected) return;
-    if (useRtc.value) {
-      rtc.start();
-    } else if (!stream.running.value) {
-      stream.start();
+    if (!isConnected) {
+      mode.value = "";
+      return;
     }
+    pickTransport();
   },
   { immediate: true },
 );
+watch([hevcAvailable, webrtcEnabled], () => {
+  if (props.connected) pickTransport();
+});
 
 onUnmounted(() => {
+  hevc.stop();
+  hevc.dispose();
   stream.stop();
   stream.dispose();
   rtc.stop();

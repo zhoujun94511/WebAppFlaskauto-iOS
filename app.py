@@ -86,6 +86,43 @@ def load_config() -> dict:
     }
 
 
+class _WerkzeugClosedWebsocket:
+    """Quiet a WebSocket close on Werkzeug's development server.
+
+    simple-websocket writes the ``101`` on ``environ['werkzeug.socket']`` and
+    Engine.IO then returns ``[]`` without calling ``start_response``. When the
+    client disconnects (page load, login reconnect), the dev server finishes
+    that request with ``write(b"")`` and raises
+    ``AssertionError: write() before start_response``.
+
+    ``ConnectionAbortedError`` is the signal that server already treats as a
+    dropped client, so the close produces no traceback. Other servers, and
+    ordinary HTTP that forgot ``start_response``, are left alone.
+    """
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        started = False
+
+        def _start(status, headers, exc_info=None):
+            nonlocal started
+            started = True
+            return start_response(status, headers, exc_info)
+
+        result = self.wsgi_app(environ, _start)
+        upgrade = environ.get("HTTP_UPGRADE", "")
+        if (
+            not started
+            and "werkzeug.socket" in environ
+            and isinstance(upgrade, str)
+            and upgrade.lower() == "websocket"
+        ):
+            raise ConnectionAbortedError
+        return result
+
+
 def create_app():
     config = load_config()
     flask_app = Flask(__name__, static_folder=None)
@@ -108,6 +145,9 @@ def create_app():
         logger=False,
         engineio_logger=False,
     )
+    # Outermost: Werkzeug's dev server asserts if a hijacked websocket
+    # returns without start_response. See _WerkzeugClosedWebsocket.
+    flask_app.wsgi_app = _WerkzeugClosedWebsocket(flask_app.wsgi_app)
 
     # Platform adapter + API + Socket.IO handlers.
     from services import init_platform

@@ -8,6 +8,7 @@ const error = ref("");
 const backendHealthy = ref(null); // pymobiledevice3 available (only valid when reachable)
 const backendReachable = ref(null); // did /api/health answer at all?
 const webrtcEnabled = ref(false);
+const hevcAvailable = ref(null); // null until /api/health answers
 let _bound = false;
 
 export function useDevices() {
@@ -40,6 +41,7 @@ export function useDevices() {
       // Only meaningful when the backend actually answered.
       backendHealthy.value = !!h.pymobiledevice3_available;
       webrtcEnabled.value = !!h.webrtc_enabled;
+      hevcAvailable.value = !!h.hevc_available;
       return h;
     } catch {
       // Request failed → the backend is unreachable (not "pymobiledevice3
@@ -60,7 +62,11 @@ export function useDevices() {
   async function disconnect(udid) {
     await devicesApi.disconnect(udid);
     const d = devices.value.find((x) => x.udid === udid);
-    if (d) d.connected = false;
+    if (d) {
+      d.connected = false;
+      d.wda_running = false;
+      d.streaming = false;
+    }
   }
 
   function _replace(device) {
@@ -69,5 +75,5 @@ export function useDevices() {
     else devices.value.push(device);
   }
 
-  return { devices, loading, error, backendHealthy, backendReachable, webrtcEnabled, refresh, checkHealth, connect, disconnect, emit };
+  return { devices, loading, error, backendHealthy, backendReachable, webrtcEnabled, hevcAvailable, refresh, checkHealth, connect, disconnect, emit };
 }

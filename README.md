@@ -1,4 +1,4 @@
-# WebAppFlaskauto-iOS — Web端iOS投屏/控制/运维平台
+# Web端iOS投屏/控制/运维平台
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 
 [中文](README.md) • [English](README_en.md)
 
-[功能特性](#功能特性) • [快速开始](#快速开始) • [安全设计](#安全设计) • [API 文档](#api-文档) • [故障排除](#故障排除)
+[功能特性](#功能特性) • [快速开始](#快速开始) • [安全设计](#安全设计) • [API 文档](#api-文档) • [故障排除](#故障排除) • [致谢](#致谢)
 
 </div>
 
@@ -25,7 +25,7 @@
 
 WebAppFlaskauto-iOS 是一个**纯浏览器**的 iOS 真机远程镜像与控制平台。无需安装任何客户端，打开网页即可:发现已连接的 iPhone、实时镜像屏幕、远程触控/滑动/输入、截图、管理应用、浏览/预览/传输文件、查看实时系统日志、运行 UI 自动化定位。
 
-底层通过 **WebDriverAgent(WDA)** 驱动设备,画面采用 **WDA MJPEG(主)+ 截图轮询(兜底)**,并可选开启 **WebRTC(aiortc)** 低延迟视频。设备发现与 lockdown 信息走纯 Python 的 **pymobiledevice3**;iOS 17+ 的免管理员隧道与拉起 WDA 由内置 **go-ios** 负责。
+底层通过 **WebDriverAgent(WDA)** 驱动设备。画面有三条路:**iOS 27+ 单设备原生 HEVC**(pymobiledevice3 的 CoreDevice 屏幕流,浏览器 WebCodecs 解码)、**WDA MJPEG**(可选 WebRTC 重编码)、**截图轮询**(兜底)。设备发现与 lockdown 信息走纯 Python 的 **pymobiledevice3**;iOS 17+ 的免管理员隧道与拉起 WDA 由内置 **go-ios** 负责。
 
 在镜像能力之上,平台内置完整的**账号体系**与**设备占用(预约)机制**,可作为团队共享的 iOS 真机运维台:谁在用哪台设备一目了然,管理员可强制释放、管理用户。
 
@@ -99,9 +99,11 @@ IOSAdapter
  ├─ PortForward       pymobiledevice3 usbmux:本地端口 → WDA 8100/9100      │ (无需隧道)
  ├─ WDAController     WebDriverAgent HTTP:tap/swipe/text/截图/应用/弹窗     ┘
  ├─ GoIOS + Tunnel    go-ios:用户态 RSD 隧道(免管理员) + `runwda`         ← iOS 17+ 拉起
- ├─ ScreenProvider    wda_mjpeg(主) / wda_screenshot(兜底)
- └─ StreamBridge      画面帧 → Socket.IO room=udid
-                      WebRTCBridge → aiortc(JpegVideoTrack, 宿主侧 libx264)
+ ├─ ScreenTransport   pymobiledevice3:iOS 27+ 原生 HEVC(自己的 RSD 隧道)
+ ├─ ScreenProvider    wda_mjpeg / wda_screenshot
+ └─ StreamBridge      MJPEG 帧 → Socket.IO room=udid
+                      HEVC → stream:hevc-config / stream:hevc
+                      WebRTCBridge → aiortc(JpegVideoTrack, 仅 MJPEG 路径)
    ▼
 SQLite (账号 / 会话 / 设备占用)
 ```
@@ -110,12 +112,38 @@ SQLite (账号 / 会话 / 设备占用)
 
 - **pymobiledevice3(纯 Python,主引擎)**:做一切不需要隧道的事——设备发现、usbmux 端口转发到 WDA(8100 控制 / 9100 MJPEG)、所有 WDA HTTP。
 - **go-ios(可选,补位)**:只负责 pymobiledevice3 在 Windows/iOS 17+ 免管理员做不到的——**用户态隧道 + 拉起 WDA**。它是*互补*而非替换:缺失即回退 pymobiledevice3。(go-ios ≠ tidevice;本项目不使用 tidevice。)
+- **HEVC 另开一条隧道**:原生画面走 pymobiledevice3 自己的 Userspace RSD,与 go-ios 拉起 WDA 的隧道分开,usbmux 上的控制端口继续可用。
 
-### 画面链路(为什么 MJPEG 优先)
+### 画面链路
 
-iOS 没有 scrcpy 式的 H.264 镜像(除非走 macOS 采集路径)。最快可用的回路是 **WDA 的 MJPEG**(主)+ **截图轮询**(兜底),两者都跨平台。可选开启 **WebRTC**(`IOS_ENABLE_WEBRTC=1`):`JpegVideoTrack` 把 MJPEG 字节解码后用 aiortc(H264 优先,VP8 兜底)重编码,并支持流中自愈(无缝切到截图源);浏览器侧 `control` DataChannel 复用同一条 PeerConnection 传输触控。`IOS_WEBRTC_MAX_BITRATE`(默认 6 Mbps)抬高码率上限改善动态画面清晰度——它是**宿主侧 libx264 软编**,CPU 随分辨率 × 设备数增长,多设备网格会自动降分辨率分担。
+单设备在 iOS 27 及以上时,界面请求 `auto`,后端走 pymobiledevice3 的 CoreDevice 屏幕流:
+
+```
+iPhone
+  ↓  pymobiledevice3 Userspace RSD 隧道(与 go-ios 的 WDA 隧道分开)
+  ↓  com.apple.coredevice.feature.startmediastream
+  ↓  设备主动推送的 HEVC RTP
+  ↓  Socket.IO:stream:hevc-config(codec + hvcC),然后 stream:hevc 访问单元
+  ↓  浏览器 WebCodecs 解码到 canvas
+```
+
+触控、滑动、输入仍由 WDA HTTP 完成。多设备网格保持 JPEG。开流失败或中途中断时,单设备回到 WDA MJPEG,再不行则截图。`IOS_SCREEN_PROVIDER` 默认是 `mjpeg`;只有单设备界面会请求 `auto`。HEVC 开着时这是一次独占的远程控制媒体会话,相机和麦克风会被系统占住。
+
+低于 iOS 27,以及关闭这条原生流时,画面是 **WDA MJPEG** + **截图轮询**。可选 **WebRTC**(`IOS_ENABLE_WEBRTC=1`):`JpegVideoTrack` 把 MJPEG 字节解码后用 aiortc(H264 优先,VP8 兜底)在宿主侧重编码;浏览器侧 `control` DataChannel 复用同一条 PeerConnection 传输触控。`IOS_WEBRTC_MAX_BITRATE`(默认 6 Mbps)是**宿主侧 libx264 软编**,CPU 随分辨率 × 设备数增长,多设备网格会自动降分辨率。
 
 > 历史说明:曾评估 QuickTime-over-USB 硬件 H.264(QVH),因 macOS libusb 整机声明会破坏 usbmux/WDA 控制、且无 Windows 构建,**已彻底移除**,稳定性优先。
+
+#### 为什么文档里的 iOS 17+ 在 18.6 上开不了 HEVC
+
+pymobiledevice3 把 `display serve-web`、`start-video-stream` 放在 iOS 17+ 的 CoreDevice/RSD 体系下。这说的是**隧道和接口从哪一版开始存在**。挂上开发者镜像之后,iOS 18.6.2 上 `com.apple.coredevice.displayservice` 已经在,客户端库也不做系统版本判断。
+
+真正调用 `startmediastream` 时,手机会拒绝,原话是:
+
+```text
+Remote control requires iOS 27.0 or later on this device. (code 9021)
+```
+
+这是设备返回的 CoreDevice 错误(code **9021**),不是本仓库或 pymobiledevice3 里写死的字符串。2026-09-23 在 **iPhone16,2 / iOS 18.6.2(22G100)** 上复测仍是这条 9021;同一条 USB 上的 **iPhone17,5 / iOS 27.0** 可以出关键帧和 hvcC。因此产品门槛按设备答复定为 **iOS 27.0+**(`ios/screen_transport/policy.py`)。18.6.5 同样低于 27.0,会得到同一条拒绝,单设备自动留在 WDA MJPEG。
 
 ### 设备占用模型
 
@@ -149,21 +177,23 @@ WebAppFlaskauto-iOS/
 │   ├── device_info.py          #   lockdown 信息聚合(in-process 单连接)
 │   ├── ios_file_service.py     #   go-ios fsync:tree/pull/push
 │   ├── ios_app_service.py      #   go-ios:应用列举/安装/卸载
-│   ├── stream_bridge.py        #   画面帧 → Socket.IO
-│   ├── webrtc_bridge.py        #   aiortc 管线(JpegVideoTrack + 码率调优)
+│   ├── stream_bridge.py        #   MJPEG 画面帧 → Socket.IO
+│   ├── encoded_stream.py       #   HEVC 访问单元 → Socket.IO
+│   ├── webrtc_bridge.py        #   aiortc 管线(仅 MJPEG 路径)
 │   └── ...
 ├── ios/                        # iOS 平台适配
 │   ├── ios_adapter.py          #   统一门面(发现/连接/控制/流)
 │   ├── go_ios.py               #   go-ios 封装(隧道/runwda/fsync/apps/无障碍)
 │   ├── tunnel_manager.py       #   用户态 RSD 隧道生命周期
 │   ├── port_forward.py         #   usbmux 端口转发
-│   └── screen_provider/        #   wda_mjpeg / wda_screenshot 插件
+│   ├── screen_provider/        #   wda_mjpeg / wda_screenshot
+│   └── screen_transport/       #   HEVC:hevc_rsd.py + policy.py(门槛 iOS 27)
 ├── frontend/                   # Vue 3 + Vite 前端(dist/ 由 Flask 托管)
 │   └── src/
 │       ├── components/         #   LoginView / NavRail / DeviceCard / DeviceStage /
 │       │                       #   DeviceMatrix / DeviceStrip / ControlPanel /
 │       │                       #   AutomationPanel / AppsPanel / FilesPanel / LogPanel ...
-│       ├── composables/        #   useAuth / useDevices / useWebRTC / useStream /
+│       ├── composables/        #   useAuth / useDevices / useHevcStream / useWebRTC / useStream /
 │       │                       #   useControl / useValidators / useApiError / useUiI18n ...
 │       └── locales/            #   en / zh-CN / zh-TW 三语
 ├── scripts/
@@ -180,8 +210,8 @@ WebAppFlaskauto-iOS/
 ## 功能特性
 
 ### 远程镜像与控制
-- 实时投屏:WDA **MJPEG**(主)/ **截图**(兜底);可选 **WebRTC**(H264/VP8,码率可调)
-- 单设备舞台视图 / 多设备实时网格视图(进网格自动降分辨率减负)
+- 实时投屏:**iOS 27+ 单设备原生 HEVC**(浏览器 WebCodecs);更低版本与多设备网格用 WDA **MJPEG** / **截图**;MJPEG 可选 **WebRTC**(H264/VP8,码率可调)
+- 单设备舞台视图 / 多设备实时网格视图(网格保持 JPEG,并自动降分辨率)
 - 触控、滑动、文本输入、Home/锁屏/音量、方向 D-pad(WDA swipe 合成)、截图
 - **无障碍快捷开关**:辅助触控 / 旁白(VoiceOver)/ 缩放(经 go-ios)
 
@@ -306,7 +336,8 @@ copy resources\wintun\amd64\wintun.dll resources\executable\win\wintun.dll
 | `OPEN_BROWSER`            | `1`              | 是否自动开浏览器(`0` 关闭)                      |
 | `IOS_USE_GOIOS`           | `1`              | 用 go-ios 起免管理员隧道 + 拉 WDA(`0` 改手动模式)   |
 | `IOS_WDA_BUNDLE_ID`       | —                | 实际安装的 WDA runner bundle id            |
-| `IOS_ENABLE_WEBRTC`       | `1`              | 开启 WebRTC 视频(`0` 仅用 MJPEG/截图)         |
+| `IOS_SCREEN_PROVIDER`     | `mjpeg`          | 默认画面源。单设备界面请求 `auto`:iOS 27+ 用 HEVC,否则 MJPEG |
+| `IOS_ENABLE_WEBRTC`       | `1`              | 开启 WebRTC 视频(`0` 仅用 MJPEG/截图;HEVC 不走这条) |
 | `IOS_WEBRTC_MAX_BITRATE`  | `6000000`        | WebRTC 码率上限(宿主侧 libx264,影响 CPU)       |
 | `IOS_MJPEG_FRAMERATE`     | `40`             | MJPEG 帧率                              |
 | `IOS_MJPEG_QUALITY`       | `70`             | MJPEG JPEG 质量                         |
@@ -366,7 +397,7 @@ copy resources\wintun\amd64\wintun.dll resources\executable\win\wintun.dll
 
 | 方法       | 路径                                                          | 说明                       |
 |----------|-------------------------------------------------------------|--------------------------|
-| GET      | `/api/health`、`/api/devices?rescan=1`、`/api/devices/<udid>` | 健康 / 列表 / 详情             |
+| GET      | `/api/health`、`/api/devices?rescan=1`、`/api/devices/<udid>` | 健康 / 列表 / 详情。`hevc_available` 只表示本机能导入 HEVC 库 |
 | GET      | `/api/devices/<udid>/info`                                  | lockdown 设备信息            |
 | POST     | `/api/devices/<udid>/connect` `/disconnect`                 | 连接 / 断开(起隧道+WDA)         |
 | POST     | `/api/devices/<udid>/tap` `/swipe` `/input` `/screenshot`   | 触控 / 输入 / 截图             |
@@ -382,6 +413,7 @@ copy resources\wintun\amd64\wintun.dll resources\executable\win\wintun.dll
 
 ### Socket.IO 事件
 - **画面/控制**:`stream:start/stop/status`、`control:tap/swipe/input`(→ `stream:frame/started/stopped/error`)
+- **HEVC**(仅 iOS 27+ 单设备):`stream:hevc-config`(codec + base64 hvcC)、`stream:hevc`(访问单元)、`stream:keyframe`(请求关键帧)
 - **WebRTC 信令**(非 trickle):`webrtc:offer`(→ `webrtc:answer` / `webrtc:error`)、`webrtc:stop`
 - **设备/广播**:`devices:list/refresh`(→ `devices:changed`、`device:connected/disconnected`、`wda:status`)
 
@@ -416,8 +448,18 @@ python scripts/run_checks.py        # 一键:构建 SPA + 单测 + 自启真机 
 - **WDA_NOT_RUNNING** → WDA 已安装且在设备上运行、监听 8100?`IOS_WDA_BUNDLE_ID` 正确?
 - **IOS17_TUNNEL_FAILED** → iOS 17+ 隧道未起:Windows 检查 `wintun.dll`;或 `IOS_USE_GOIOS=0` 手动起隧道/WDA。
 - **黑屏 / 无画面** → 试 `screenshot` 源;MJPEG 需要 WDA 的 MJPEG server(9100)。
+- **iOS 18 没有 HEVC / code 9021** → 手机返回 `Remote control requires iOS 27.0 or later on this device. (code 9021)`。隧道和 display 服务可以存在,开流仍被设备拒绝。iOS 27.0 以下自动用 MJPEG,见[为什么文档里的 iOS 17+ 在 18.6 上开不了 HEVC](#为什么文档里的-ios-17-在-186-上开不了-hevc)。
+- **HEVC 时相机打不开** → `startmediastream` 占住远程控制媒体会话,相机会被系统锁住;回到 MJPEG/截图后释放。
 - **重启后需重新登录** → 未固定 `SECRET_KEY`(随机密钥每次重启变化),属预期;固定即可缓解。
 - **Windows usbmux 无设备** → 安装 Apple Devices / iTunes(提供 Apple Mobile Device Service)。
+
+## 致谢
+
+画面、隧道和控制都站在这些项目上:
+
+- [**go-ios**](https://github.com/danielpaulus/go-ios) — iOS 17+ 的用户态 RSD 隧道、`runwda` 拉起 WDA,以及应用与文件相关命令。
+- [**pymobiledevice3**](https://github.com/doronz88/pymobiledevice3) — 设备发现、usbmux、lockdown、开发者镜像挂载,以及 iOS 27+ 的 CoreDevice HEVC 屏幕流。
+- [**WebDriverAgent**](https://github.com/appium/WebDriverAgent) — 设备上的控制与 MJPEG 服务:触控、输入、截图和自动化都通过它完成。
 
 ---
 

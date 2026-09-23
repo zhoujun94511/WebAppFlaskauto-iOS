@@ -194,9 +194,18 @@ class WDAController:
         self._session_request("POST", "/wda/pressButton", json={"name": name})
 
     def home(self) -> None:
-        # Via pressButton (reliable); the top-level /wda/homescreen 500s on some
-        # builds.
-        self.press_button("home")
+        """Open SpringBoard.
+
+        On iOS 18.6.2, ``pressButton`` name ``home`` returns 200 and leaves
+        the foreground app where it is (this phone has no Home button).
+        ``POST /wda/homescreen`` is the command that actually switches to
+        SpringBoard there, and it also succeeds on iOS 27. If that route is
+        missing, fall back to the hardware button.
+        """
+        try:
+            self._request("POST", "/wda/homescreen")
+        except AppError:
+            self.press_button("home")
 
     def lock(self) -> None:
         self._request("POST", "/wda/lock")

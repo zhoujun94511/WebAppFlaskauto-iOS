@@ -172,7 +172,7 @@ const visibleRows = computed(() => {
   const walk = (list, depth) => {
     for (const node of list) {
       out.push({ node, depth });
-      if (node.isDir && node.expanded && node.children.length) walk(node.children, depth + 1);
+      if (node.isDir && node.expanded && node.children && node.children.length) walk(node.children, depth + 1);
     }
   };
   walk(nodes.value, 0);
@@ -185,12 +185,28 @@ const anyExpanded = computed(() => {
   return found;
 });
 
+function fromEntries(entries) {
+  return entries.map((entry) => ({
+    name: entry.name,
+    isDir: !!entry.isDir,
+    expanded: false,
+    children: entry.isDir ? null : [],
+    path: entry.path,
+    loading: false,
+  }));
+}
+
+async function loadDir(dir) {
+  const d = await filesApi.tree(props.udid, dir || ".");
+  if (Array.isArray(d.entries)) return fromEntries(d.entries);
+  return parseTree(d.tree, dir);
+}
+
 async function list() {
   loading.value = true;
   error.value = "";
   try {
-    const d = await filesApi.tree(props.udid, path.value || ".");
-    nodes.value = d.tree ? parseTree(d.tree, path.value) : [];
+    nodes.value = await loadDir(path.value || ".");
     listed.value = true;
     // Link the upload target to the browsed sub-directory; keep the default for root.
     if (path.value && path.value !== ".") upPath.value = path.value.replace(/\/+$/, "");
@@ -201,9 +217,22 @@ async function list() {
   }
 }
 
-function onRow(node) {
-  if (node.isDir) node.expanded = !node.expanded;
-  else downloadNode(node);
+async function onRow(node) {
+  if (!node.isDir) {
+    downloadNode(node);
+    return;
+  }
+  node.expanded = !node.expanded;
+  if (!node.expanded || node.children) return;
+  node.loading = true;
+  try {
+    node.children = await loadDir(node.path);
+  } catch (e) {
+    error.value = e.message;
+    node.expanded = false;
+  } finally {
+    node.loading = false;
+  }
 }
 
 function collapseAll() {

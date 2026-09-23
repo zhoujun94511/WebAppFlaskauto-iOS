@@ -27,6 +27,34 @@ _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 # NIC during ICE gathering on Windows — quiet it to WARNING.
 _QUIET_LOGGERS = {"aioice.ice": logging.WARNING, "aioice.turn": logging.WARNING}
 
+
+class _BelowWarning(logging.Filter):
+    """Keep INFO/DEBUG off stderr.
+
+    ``StreamHandler()`` writes to stderr. IDE consoles paint every stderr line
+    as an error, so a normal INFO line looks like a failure.
+    Those levels go to stdout; WARNING and above stay on stderr.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno < logging.WARNING
+
+
+class _HideSocketIoAccess(logging.Filter):
+    """Drop Werkzeug's per-request line for Socket.IO long-polling.
+
+    The browser keeps a polling transport, so every heartbeat and every HEVC
+    frame is its own HTTP request. Those lines bury connect, WDA, and errors.
+    Other Werkzeug lines (API routes, the dev-server warning) stay.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            return True
+        return "/socket.io/" not in message
+
 # ANSI SGR colours per level so the console isn't a wall of red. Without explicit
 # colour codes, terminals/IDEs paint ALL stderr red — making INFO look like an
 # error. Plain (no codes) on non-TTY sinks so log FILES stay greppable.
@@ -137,13 +165,8 @@ def setup_logging(level: int = logging.INFO) -> None:
     root = logging.getLogger()
     root.setLevel(_resolve_level(level))
 
-    # Console: per-level ANSI colour on a TTY so INFO reads green (not red).
-    stream = logging.StreamHandler()
-    use_color = _stream_supports_color(stream.stream)
-    if use_color and os.name == "nt":
-        # Enable ANSI on Win10+ consoles so the codes render instead of leaking.
-        # getattr avoids static-analysis "unresolved reference" noise for the
-        # Win32 calls on non-Windows checkouts (this branch only runs on nt).
+    # INFO/DEBUG -> stdout. WARNING+ -> stderr, which IDE consoles paint red.
+    if os.name == "nt":
         with suppress(Exception):
             import ctypes
 
@@ -152,8 +175,13 @@ def setup_logging(level: int = logging.INFO) -> None:
             set_mode = getattr(kernel32, "SetConsoleMode")
             set_mode(get_std(-11), 7)  # stdout
             set_mode(get_std(-12), 7)  # stderr
-    stream.setFormatter(_AlignedFormatter(use_color=use_color))
-    root.addHandler(stream)
+    for console, minimum in ((sys.stdout, logging.DEBUG), (sys.stderr, logging.WARNING)):
+        stream = logging.StreamHandler(console)
+        stream.setLevel(minimum)
+        if minimum == logging.DEBUG:
+            stream.addFilter(_BelowWarning())
+        stream.setFormatter(_AlignedFormatter(use_color=_stream_supports_color(console)))
+        root.addHandler(stream)
 
     # Mirror everything to a per-run file under logs/ — always plain (no ANSI).
     try:
@@ -163,7 +191,7 @@ def setup_logging(level: int = logging.INFO) -> None:
         file_handler = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
         file_handler.setFormatter(_AlignedFormatter(use_color=False))
         root.addHandler(file_handler)
-        print(f"[logging] writing to {log_path}", file=sys.stderr)
+        print(f"[logging] writing to {log_path}", file=sys.stdout)
     except OSError as exc:  # disk full / read-only — keep console + ring only
         print(f"[logging] file handler disabled: {exc}", file=sys.stderr)
 
@@ -171,6 +199,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 
     for name, lvl in _QUIET_LOGGERS.items():
         logging.getLogger(name).setLevel(lvl)
+    logging.getLogger("werkzeug").addFilter(_HideSocketIoAccess())
 
 
 def get_logger(name: str) -> logging.Logger:

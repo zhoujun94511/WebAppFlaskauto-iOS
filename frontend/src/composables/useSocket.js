@@ -1,9 +1,11 @@
 import { io } from "socket.io-client";
 import { ref } from "vue";
 
-// One shared Socket.IO connection. Force long-polling first to match the
-// backend (Flask-SocketIO threading mode can't always upgrade to WS cleanly),
-// then let it upgrade if possible.
+// One shared Socket.IO connection. HEVC frames ride this websocket.
+// Long-polling turns every access unit into its own HTTP response
+// (`451-["stream:hevc", ...]` plus the binary body). A fresh websocket
+// through the Vite proxy completes the upgrade; do not start on polling
+// and then upgrade, that path produced "Invalid frame header".
 let _socket = null;
 const connected = ref(false);
 
@@ -11,7 +13,7 @@ export function useSocket() {
   if (!_socket) {
     _socket = io({
       path: "/socket.io",
-      transports: ["polling", "websocket"],
+      transports: ["websocket"],
       reconnection: true,
       reconnectionDelay: 1000,
     });

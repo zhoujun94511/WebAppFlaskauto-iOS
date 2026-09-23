@@ -17,6 +17,25 @@ export default defineConfig({
         target: "http://127.0.0.1:5001",
         ws: true,
         changeOrigin: true,
+        configure(proxy) {
+          // Vite logs every proxy-socket error in red. A client disconnect
+          // (refresh, login reconnect) aborts the upstream write; that is the
+          // same close as the backend, not a failed API call. Keep
+          // ECONNREFUSED and anything else visible.
+          proxy.on("proxyReqWs", (_proxyReq, _req, socket) => {
+            const emit = socket.emit.bind(socket);
+            socket.emit = (event, ...args) => {
+              const code = args[0] && args[0].code;
+              if (
+                event === "error" &&
+                (code === "ECONNABORTED" || code === "ECONNRESET" || code === "EPIPE")
+              ) {
+                return false;
+              }
+              return emit(event, ...args);
+            };
+          });
+        },
       },
     },
   },

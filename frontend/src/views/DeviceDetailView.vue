@@ -168,8 +168,7 @@ async function disconnectDevice() {
   disconnecting.value = true;
   err.value = "";
   try {
-    await disconnect(props.udid); // tears down WDA + forwards on the backend
-    emit("back"); // device released → return to the list
+    await disconnect(props.udid); // tears down WDA + forwards; stay on this stage
   } catch (e) {
     err.value = e.message || t("detail.disconnectFailed");
   } finally {

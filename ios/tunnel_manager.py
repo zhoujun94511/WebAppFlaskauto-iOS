@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Tuple
+from pathlib import Path
+from typing import Optional, Tuple
 
 from ios.go_ios import GoIOS
 from utils.logging_setup import get_logger
@@ -28,12 +29,42 @@ from utils.port_utils import is_port_open, kill_listeners
 
 _log = get_logger(__name__)
 
-# go-ios's built-in "Go-iOS Agent" HTTP-API port. With ENABLE_GO_IOS_AGENT=user
-# (which we set on every tunnel/dev command), go-ios ALWAYS spins up this default
-# agent in addition to the one pinned via --tunnel-info-port -- so a single tunnel
-# start leaves TWO agent processes (the pinned info-port one AND this 60105 one),
-# each holding device tunnels. Our reclaim/stop must free BOTH ports or the 60105
-# agent leaks across restarts and orphans accumulate.
+
+def tunnels_listed(raw: str) -> Optional[bool]:
+    """Whether ``tunnel ls`` output contains a non-empty tunnel list.
+
+    go-ios prints a JSON warning on its own line (``agent is not running``)
+    and the list on another. A warning object must not count as a tunnel.
+    ``None`` means no list was present.
+    """
+    found: Optional[bool] = None
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, list):
+            found = len(data) > 0
+    return found
+
+
+def _agent_log_tail(proc, limit: int = 8) -> str:
+    path = getattr(proc, "_goios_log", None) if proc is not None else None
+    if not path:
+        return ""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = [line for line in text.splitlines() if line.strip()]
+    return "\n".join(lines[-limit:])
+
+# go-ios's default agent port. A leftover `ENABLE_GO_IOS_AGENT=user` process
+# listens here and opens its own lockdown session beside the agent we pin to
+# 28100. Reclaim it so only one tunnel talks to the phone.
 _GOIOS_DEFAULT_AGENT_PORT = 60105
 
 
@@ -56,27 +87,18 @@ class TunnelManager:
                 kill_listeners(port)
 
     def status(self) -> Tuple[bool, str]:
-        """(running, raw). Queries the PINNED info port so it doesn't spawn a
-        second agent on a different port."""
-        code, out, err = self.goios.run(
-            ["tunnel", "ls", *self._port_flag()], timeout=15, agent=True
+        """(running, raw). Query the pinned info port only.
+
+        ``agent=False``: ENABLE_GO_IOS_AGENT would fork a second ``tunnel start``
+        on port 60105 before this command runs, and that copy fights the agent
+        we already started for the same lockdown session.
+        """
+        _code, out, err = self.goios.run(
+            ["tunnel", "ls", *self._port_flag()], timeout=15, agent=False
         )
         raw = (out or err or "").strip()
-        low = raw.lower()
-        if "not running" in low or "no connection could be made" in low or "refused" in low:
-            return False, raw
-        for line in reversed(raw.splitlines()):
-            line = line.strip()
-            if line.startswith("[") or line.startswith("{"):
-                try:
-                    data = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(data, list):
-                    return len(data) > 0, raw
-                if isinstance(data, dict):
-                    return bool(data), raw
-        return code == 0, raw
+        ready = tunnels_listed(raw)
+        return bool(ready), raw
 
     def reclaim(self) -> None:
         """Startup cleanup: hard-kill a leftover agent listening on the pinned
@@ -113,22 +135,31 @@ class TunnelManager:
                 self._reclaim_agent_ports()
                 _log.info("starting go-ios userspace tunnel on port %d (no admin)...", self.info_port)
                 try:
+                    # agent=False so this process is the only tunnel. log_file
+                    # keeps the handshake error off DEVNULL.
                     self._agent = self.goios.popen(
                         ["tunnel", "start", "--userspace", *self._port_flag()],
-                        agent=True,
+                        agent=False,
+                        log_file=True,
                     )
                 except Exception as exc:  # noqa: BLE001
                     return False, f"failed to spawn tunnel agent: {exc}"
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._agent and self._agent.poll() is not None:
-                ok, raw = self.status()
-                return ok, "tunnel ready" if ok else f"tunnel agent exited: {raw[:200]}"
+                ok, _raw = self.status()
+                if ok:
+                    return True, "tunnel ready"
+                detail = _agent_log_tail(self._agent) or "tunnel agent exited"
+                return False, detail
             ok, _ = self.status()
             if ok:
                 _log.info("go-ios userspace tunnel ready")
                 return True, "tunnel ready"
             time.sleep(1.0)
+        detail = _agent_log_tail(self._agent)
+        if detail:
+            return False, f"tunnel did not become ready in time\n{detail}"
         return False, "tunnel did not become ready in time"
 
     def stop(self) -> None:

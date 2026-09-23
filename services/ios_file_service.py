@@ -1,11 +1,15 @@
-"""Device file transfer via go-ios fsync.
+"""Device file transfer.
 
-Two scopes: the AFC media root (no app), or an app's Documents sandbox
-(``app=<bundleId>``, only apps with file sharing enabled). No WDA/tunnel needed.
+Media root listings come from pymobiledevice3 AFC, one directory at a time.
+go-ios ``fsync tree`` on this build prints every nested name at column 0, so a
+photo inside ``DCIM/100APPLE`` was requested as ``IMG_0132.PNG`` and AFC
+answered "object not found". Pull/push still use go-ios fsync. An app Documents
+sandbox (``app=<bundleId>``) stays on go-ios as well.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from typing import Optional
@@ -15,6 +19,20 @@ from utils.app_errors import AppError, ErrorCode
 from utils.logging_setup import get_logger
 
 _log = get_logger(__name__)
+
+
+def _child(parent: str, name: str) -> str:
+    if parent in ("", "/"):
+        return "/" + name
+    return parent.rstrip("/") + "/" + name
+
+
+def media_afc_path(path: str) -> str:
+    """Map a panel path (``.`` or ``DCIM/100APPLE``) to an AFC absolute path."""
+    raw = (path or ".").strip().replace("\\", "/")
+    if raw in (".", "", "/"):
+        return "/"
+    return "/" + raw.strip("/")
 
 
 class IOSFileService:
@@ -28,7 +46,34 @@ class IOSFileService:
 
     @classmethod
     def tree(cls, udid: str, path: str = ".", app: Optional[str] = None) -> dict:
-        return {"path": path, "app": app or None, "tree": cls._goios().fsync_tree(udid, path, app)}
+        if app:
+            return {"path": path, "app": app, "tree": cls._goios().fsync_tree(udid, path, app)}
+        try:
+            entries = asyncio.run(cls._list_media(udid, media_afc_path(path)))
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — AFC errors become a panel message
+            raise AppError(ErrorCode.BAD_REQUEST, f"list failed: {exc}", {"path": path}) from exc
+        return {"path": path, "app": None, "entries": entries}
+
+    @staticmethod
+    async def _list_media(udid: str, remote: str) -> list[dict]:
+        from pymobiledevice3.lockdown import create_using_usbmux
+        from pymobiledevice3.services.afc import AfcService
+
+        lockdown = await create_using_usbmux(serial=udid)
+        async with AfcService(lockdown) as afc:
+            names = [name for name in await afc.listdir(remote) if name not in (".", "..")]
+            # One AFC operation at a time. This connection is not safe to fan out.
+            flags = []
+            for name in names:
+                flags.append(await afc.isdir(_child(remote, name)))
+        entries = []
+        for name, is_dir in zip(names, flags):
+            rel = media_afc_path(_child(remote, name)).lstrip("/")
+            entries.append({"name": name, "path": rel, "isDir": bool(is_dir)})
+        entries.sort(key=lambda item: (not item["isDir"], item["name"].lower()))
+        return entries
 
     @classmethod
     def pull_to_temp(cls, udid: str, src_path: str, app: Optional[str] = None) -> str:

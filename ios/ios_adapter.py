@@ -94,6 +94,11 @@ class IOSAdapter:
             _log.info("device unplugged, tearing down: %s", udid)
             with suppress(Exception):
                 self.disconnect(udid)
+        if scanned:
+            # The image file does not need the connect click. Mount still does.
+            from ios.ddi_prefetch import schedule_personalized_ddi_prefetch
+
+            schedule_personalized_ddi_prefetch()
         return state.list_devices()
 
     def refresh_device(self, udid: str) -> IOSDevice:
@@ -173,6 +178,26 @@ class IOSAdapter:
             pass
         return device
 
+    def _ensure_tunnel(self, udid: str, timeout: float):
+        """Start the userspace tunnel, repairing a stale HostID once.
+
+        A newer ``.plist.tmp`` is the pair record the device already accepted.
+        go-ios will not see it until it replaces ``.plist``. The running agent
+        keeps the old HostID in memory, so a repair restarts the agent.
+        """
+        from ios.pair_record import promote_pending_pair_record
+
+        if promote_pending_pair_record(udid):
+            self.tunnel.stop()
+        ok, msg = self.tunnel.ensure_running(timeout=timeout)
+        if ok or "InvalidHostID" not in str(msg):
+            return ok, msg
+        if not promote_pending_pair_record(udid):
+            return ok, msg
+        _log.info("InvalidHostID for %s; retrying tunnel with the pending pair record", udid)
+        self.tunnel.stop()
+        return self.tunnel.ensure_running(timeout=timeout)
+
     def _mount_ddi(self, udid: str) -> tuple[bool, str]:
         """Mount the Developer Disk Image — needed for iOS 17+ xctest/WDA.
 
@@ -194,6 +219,29 @@ class IOSAdapter:
         ok, gmsg = self.goios.mount_developer_image(udid, self.config.get("IOS_DDI_CACHE") or None)
         return ok, (gmsg if ok else f"pymobiledevice3: {pmd_msg}; go-ios: {gmsg}")
 
+    @staticmethod
+    def resolve_wda_bundle(configured: str, installed: list[str]) -> str:
+        """Pick the runner that is actually on the phone.
+
+        ``ios apps`` often lists the xctrunner with one extra ``.xctrunner``
+        suffix beyond the id written in config. The phone wins.
+        """
+        configured = (configured or "").strip()
+        present = [bundle for bundle in installed if bundle]
+        if configured and configured in present:
+            return configured
+        doubled = f"{configured}.xctrunner" if configured else ""
+        if doubled and doubled in present:
+            return doubled
+        runners = [bundle for bundle in present if "WebDriverAgentRunner" in bundle]
+        if len(runners) == 1:
+            return runners[0]
+        if configured:
+            prefixed = [bundle for bundle in runners if bundle.startswith(configured)]
+            if prefixed:
+                return min(prefixed, key=len)
+        return configured
+
     def _bring_up_wda(self, udid: str, controller) -> None:
         """Auto-start WebDriverAgent if it isn't answering.
 
@@ -205,9 +253,16 @@ class IOSAdapter:
 
         if self.use_goios and self.goios.is_available():
             if self._goios_tunnel_enabled:
-                ok, msg = self.tunnel.ensure_running(timeout=launch_timeout)
+                ok, msg = self._ensure_tunnel(udid, launch_timeout)
                 if not ok:
                     _log.warning("go-ios tunnel not ready: %s", msg)
+                    raise AppError(
+                        ErrorCode.IOS17_TUNNEL_FAILED,
+                        "iOS 17+ 用户态隧道没有建立，已停止挂载开发者镜像和启动 "
+                        "WebDriverAgent。请解锁手机、确认已信任此电脑后重试。\n"
+                        + str(msg)[-500:],
+                        {"reason": str(msg)[-800:]},
+                    )
             # iOS 17+ xctest/WDA needs the Developer Disk Image mounted, or
             # runwda fails with "cannot initiate an IDE session: ... broken pipe".
             # Auto-mount it (no-admin, via the tunnel; cached + fast no-op when
@@ -226,9 +281,18 @@ class IOSAdapter:
                           udid, str(mmsg)[-160:])
             proc = self._wda_procs.get(udid)
             if proc is None or proc.poll() is not None:
-                bundle = self.config.get(
+                configured = self.config.get(
                     "IOS_WDA_BUNDLE_ID", "com.facebook.WebDriverAgentRunner.xctrunner"
                 )
+                installed = [
+                    app["bundle_id"] for app in self.goios.list_apps(udid)
+                ]
+                bundle = self.resolve_wda_bundle(configured, installed)
+                if bundle != configured:
+                    _log.info(
+                        "WDA bundle %s is not on %s; using installed %s",
+                        configured, udid[:8], bundle,
+                    )
                 _log.info("launching WDA via go-ios runwda for %s (%s)", udid, bundle)
                 self._wda_procs[udid] = self.goios.run_wda(
                     udid,
@@ -419,6 +483,20 @@ class IOSAdapter:
             controller,
             fps=shot_fps,
         )
+
+    @staticmethod
+    def make_screen_transport(udid: str):
+        """Native HEVC over pymobiledevice3's userspace RSD. Not a JPEG provider.
+
+        WDA must already be up (control stays on usbmux). The transport opens
+        its own tunnel and does not claim the USB device.
+        """
+        from ios.screen_transport.hevc_rsd import HevcRsdTransport
+
+        device = state.get_device(udid)
+        if not device or not device.local_wda_port:
+            raise AppError(ErrorCode.WDA_NOT_RUNNING, "Connect the device first")
+        return HevcRsdTransport(udid)
 
     def fallback_provider(self, udid: str, fps: Optional[int] = None) -> BaseScreenProvider:
         device = state.get_device(udid)

@@ -77,6 +77,13 @@ def register(socketio) -> None:
         leave_room(udid)
         socketio.emit("stream:stopped", {"udid": udid}, room=udid)
 
+    @socketio.on("stream:keyframe")
+    def _keyframe(data):
+        udid = (data or {}).get("udid")
+        if not udid:
+            return
+        _service().request_keyframe(udid)
+
     @socketio.on("stream:status")
     def _status(data):
         udid = (data or {}).get("udid")

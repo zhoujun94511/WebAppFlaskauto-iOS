@@ -1,4 +1,4 @@
-# WebAppFlaskauto-iOS — Browser-based iOS Real-Device Mirroring & Control Platform
+# Browser-based iOS Real-Device Mirroring & Control Platform
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 
 [中文](README.md) • [English](README_en.md)
 
-[Features](#features) • [Quick Start](#quick-start) • [Security](#security-design) • [API](#api-reference) • [Troubleshooting](#troubleshooting)
+[Features](#features) • [Quick Start](#quick-start) • [Security](#security-design) • [API](#api-reference) • [Troubleshooting](#troubleshooting) • [Acknowledgments](#acknowledgments)
 
 </div>
 
@@ -25,7 +25,7 @@
 
 WebAppFlaskauto-iOS is a **pure-browser** iOS real-device mirroring and control platform. With no client to install, open a web page to: discover a connected iPhone, mirror its screen live, remotely tap/swipe/type, screenshot, manage apps, browse/preview/transfer files, watch live syslog, and run UI-automation locators.
 
-Under the hood it drives the device via **WebDriverAgent (WDA)**; the picture uses **WDA MJPEG (primary) + screenshot polling (fallback)**, with optional **WebRTC (aiortc)** low-latency video. Device discovery and lockdown info use the pure-Python **pymobiledevice3**; the admin-free tunnel and WDA bring-up for iOS 17+ are handled by the bundled **go-ios**.
+Under the hood it drives the device via **WebDriverAgent (WDA)**. The picture has three paths: **native HEVC on a single iOS 27+ device** (pymobiledevice3 CoreDevice screen stream, decoded in the browser with WebCodecs), **WDA MJPEG** (optional WebRTC re-encode), and **screenshot polling** (fallback). Device discovery and lockdown info use the pure-Python **pymobiledevice3**; the admin-free tunnel and WDA bring-up for iOS 17+ are handled by the bundled **go-ios**.
 
 On top of mirroring, the platform ships a full **account system** and a **device reservation (occupancy)** model, so it works as a shared team iOS device-ops console: who's using which device is obvious, and admins can force-release and manage users.
 
@@ -99,9 +99,11 @@ IOSAdapter
  ├─ PortForward     pymobiledevice3 usbmux: local → WDA 8100/9100          │ main path
  ├─ WDAController   WebDriverAgent HTTP: tap/swipe/text/screenshot/apps     ┘ (no tunnel)
  ├─ GoIOS + Tunnel  go-ios: userspace RSD tunnel (no admin) + `runwda`     ← iOS 17+ bring-up
- ├─ ScreenProvider  wda_mjpeg (primary) / wda_screenshot (fallback)
- └─ StreamBridge    frames → Socket.IO room=udid
-                    WebRTCBridge → aiortc (JpegVideoTrack, host-side libx264)
+ ├─ ScreenTransport pymobiledevice3: native HEVC on iOS 27+ (its own RSD tunnel)
+ ├─ ScreenProvider  wda_mjpeg / wda_screenshot
+ └─ StreamBridge    MJPEG frames → Socket.IO room=udid
+                    HEVC → stream:hevc-config / stream:hevc
+                    WebRTCBridge → aiortc (JpegVideoTrack, MJPEG path only)
    ▼
 SQLite (accounts / sessions / reservations)
 ```
@@ -110,12 +112,38 @@ SQLite (accounts / sessions / reservations)
 
 - **pymobiledevice3 (pure Python, main engine):** everything that doesn't need a tunnel — discovery, usbmux forwarding to WDA (8100 control / 9100 MJPEG), all WDA HTTP.
 - **go-ios (optional, complement):** only what pymobiledevice3 can't do admin-free on Windows/iOS 17+ — the **userspace tunnel + launching WDA**. Complementary, not a swap: absent → fall back. (go-ios ≠ tidevice; tidevice is not used.)
+- **HEVC uses a second tunnel:** the native picture goes through pymobiledevice3's own Userspace RSD, separate from the go-ios tunnel that launches WDA, so the usbmux control ports stay available.
 
-### Picture pipeline (why MJPEG first)
+### Picture pipeline
 
-iOS has no scrcpy-style H.264 mirror without a macOS capture path. The fastest working loop is WDA **MJPEG** (primary) + **screenshot** polling (fallback), both cross-platform. Optional **WebRTC** (`IOS_ENABLE_WEBRTC=1`): `JpegVideoTrack` decodes MJPEG bytes and re-encodes via aiortc (H264 first, VP8 fallback) with mid-stream self-heal (swap to the screenshot provider without tearing down the PC); a browser `control` DataChannel reuses the same PeerConnection for input. `IOS_WEBRTC_MAX_BITRATE` (default 6 Mbps) raises the bitrate ceiling for sharper motion — it's **host-side libx264**, so CPU scales with resolution × device count, and the multi-device grid auto-downscales tiles to compensate.
+On a single device running iOS 27 or later, the UI requests `auto` and the backend uses pymobiledevice3's CoreDevice screen stream:
+
+```
+iPhone
+  ↓  pymobiledevice3 Userspace RSD tunnel (separate from the go-ios WDA tunnel)
+  ↓  com.apple.coredevice.feature.startmediastream
+  ↓  device-pushed HEVC RTP
+  ↓  Socket.IO: stream:hevc-config (codec + hvcC), then stream:hevc access units
+  ↓  browser WebCodecs decode onto a canvas
+```
+
+Tap, swipe, and text stay on WDA HTTP. The multi-device grid stays on JPEG. If the stream fails to start or dies mid-way, the single-device view returns to WDA MJPEG, then to screenshots. `IOS_SCREEN_PROVIDER` defaults to `mjpeg`; only the single-device view asks for `auto`. While HEVC is up, this is an exclusive remote-control media session, so the camera and microphone are held by the system.
+
+Below iOS 27, and whenever the native stream is off, the picture is **WDA MJPEG** plus **screenshot polling**. Optional **WebRTC** (`IOS_ENABLE_WEBRTC=1`): `JpegVideoTrack` decodes MJPEG bytes and re-encodes them on the host with aiortc (H264 first, VP8 fallback); a browser `control` DataChannel reuses the same PeerConnection for input. `IOS_WEBRTC_MAX_BITRATE` (default 6 Mbps) is **host-side libx264**, so CPU scales with resolution × device count, and the multi-device grid auto-downscales tiles.
 
 > History: QuickTime-over-USB hardware H.264 (QVH) was evaluated and **fully removed** — macOS libusb's whole-device claim broke usbmux/WDA control and there was no Windows build. Stability first.
+
+#### Why the documented iOS 17+ path does not start HEVC on 18.6
+
+pymobiledevice3 documents `display serve-web` and `start-video-stream` under the iOS 17+ CoreDevice/RSD stack. That describes **when the tunnel and the service exist**. After a developer disk image is mounted, iOS 18.6.2 already has `com.apple.coredevice.displayservice`, and the client library does not check the OS version.
+
+Calling `startmediastream` is refused by the phone, in these words:
+
+```text
+Remote control requires iOS 27.0 or later on this device. (code 9021)
+```
+
+That string is a CoreDevice error from the device (code **9021**). It is not hard-coded in this repo or in pymobiledevice3. Retested on 2026-09-23: **iPhone16,2 / iOS 18.6.2 (22G100)** still returns 9021, while **iPhone17,5 / iOS 27.0** on the same USB cable produces a keyframe and hvcC. The product floor follows the device: **iOS 27.0+** (`ios/screen_transport/policy.py`). iOS 18.6.5 is also below 27.0 and gets the same refusal; the single-device view stays on WDA MJPEG.
 
 ### Reservation model
 
@@ -148,15 +176,17 @@ WebAppFlaskauto-iOS/
 │   ├── device_info.py          #   lockdown info aggregation (single in-process connection)
 │   ├── ios_file_service.py     #   go-ios fsync: tree/pull/push
 │   ├── ios_app_service.py      #   go-ios: list/install/uninstall apps
-│   ├── stream_bridge.py        #   frames → Socket.IO
-│   ├── webrtc_bridge.py        #   aiortc pipeline (JpegVideoTrack + bitrate tuning)
+│   ├── stream_bridge.py        #   MJPEG frames → Socket.IO
+│   ├── encoded_stream.py       #   HEVC access units → Socket.IO
+│   ├── webrtc_bridge.py        #   aiortc pipeline (MJPEG path only)
 │   └── ...
 ├── ios/                        # iOS platform adapter
 │   ├── ios_adapter.py          #   unified facade (discover/connect/control/stream)
 │   ├── go_ios.py               #   go-ios wrapper (tunnel/runwda/fsync/apps/accessibility)
 │   ├── tunnel_manager.py       #   userspace RSD tunnel lifecycle
 │   ├── port_forward.py         #   usbmux port forwarding
-│   └── screen_provider/        #   wda_mjpeg / wda_screenshot plugins
+│   ├── screen_provider/        #   wda_mjpeg / wda_screenshot
+│   └── screen_transport/       #   HEVC: hevc_rsd.py + policy.py (floor: iOS 27)
 ├── frontend/                   # Vue 3 + Vite (dist/ hosted by Flask)
 │   └── src/{components,composables,locales}/   # en / zh-CN / zh-TW
 ├── scripts/{init_db.py,run_checks.py}
@@ -168,8 +198,8 @@ WebAppFlaskauto-iOS/
 ## Features
 
 ### Mirroring & control
-- Live screen: WDA **MJPEG** (primary) / **screenshot** (fallback); optional **WebRTC** (H264/VP8, tunable bitrate)
-- Single-device stage view / multi-device live grid (auto-downscales tiles in grid)
+- Live screen: **native HEVC on a single iOS 27+ device** (browser WebCodecs); older versions and the multi-device grid use WDA **MJPEG** / **screenshot**; MJPEG can optionally use **WebRTC** (H264/VP8, tunable bitrate)
+- Single-device stage / multi-device live grid (the grid stays on JPEG and auto-downscales tiles)
 - Tap, swipe, text input, Home/Lock/Volume, directional D-pad (synthesized WDA swipes), screenshot
 - **Accessibility quick toggles**: AssistiveTouch / VoiceOver / Zoom (via go-ios)
 
@@ -285,7 +315,8 @@ Via environment variables (or `.env`). Common ones:
 | `OPEN_BROWSER`           | `1`                | Auto-open the browser (`0` to disable)                                         |
 | `IOS_USE_GOIOS`          | `1`                | Use go-ios for the admin-free tunnel + WDA (`0` = manual)                      |
 | `IOS_WDA_BUNDLE_ID`      | —                  | The installed WDA runner bundle id                                             |
-| `IOS_ENABLE_WEBRTC`      | `1`                | Enable WebRTC video (`0` = MJPEG/screenshot only)                              |
+| `IOS_SCREEN_PROVIDER`    | `mjpeg`            | Default picture source. The single-device view requests `auto`: HEVC on iOS 27+, otherwise MJPEG |
+| `IOS_ENABLE_WEBRTC`      | `1`                | Enable WebRTC video (`0` = MJPEG/screenshot only; HEVC does not use this path) |
 | `IOS_WEBRTC_MAX_BITRATE` | `6000000`          | WebRTC bitrate ceiling (host-side libx264; affects CPU)                        |
 | `IOS_MJPEG_FRAMERATE`    | `40`               | MJPEG frame rate                                                               |
 | `IOS_MJPEG_QUALITY`      | `70`               | MJPEG JPEG quality                                                             |
@@ -344,7 +375,7 @@ Unified envelope: success `{"success":true,"data":{},"message":"ok"}`; failure `
 
 | Method   | Path                                                          | Notes                               |
 |----------|---------------------------------------------------------------|-------------------------------------|
-| GET      | `/api/health`, `/api/devices?rescan=1`, `/api/devices/<udid>` | health / list / detail              |
+| GET      | `/api/health`, `/api/devices?rescan=1`, `/api/devices/<udid>` | health / list / detail. `hevc_available` means the HEVC library imports on this host |
 | GET      | `/api/devices/<udid>/info`                                    | lockdown device info                |
 | POST     | `/api/devices/<udid>/connect` `/disconnect`                   | connect / disconnect (tunnel + WDA) |
 | POST     | `/api/devices/<udid>/tap` `/swipe` `/input` `/screenshot`     | input / screenshot                  |
@@ -360,6 +391,7 @@ Unified envelope: success `{"success":true,"data":{},"message":"ok"}`; failure `
 
 ### Socket.IO events
 - **Stream/control:** `stream:start/stop/status`, `control:tap/swipe/input` (→ `stream:frame/started/stopped/error`)
+- **HEVC** (single device, iOS 27+ only): `stream:hevc-config` (codec + base64 hvcC), `stream:hevc` (access unit), `stream:keyframe` (request a keyframe)
 - **WebRTC signaling** (non-trickle): `webrtc:offer` (→ `webrtc:answer` / `webrtc:error`), `webrtc:stop`
 - **Devices/broadcast:** `devices:list/refresh` (→ `devices:changed`, `device:connected/disconnected`, `wda:status`)
 
@@ -394,8 +426,18 @@ python scripts/run_checks.py     # one-click: build SPA + unit + self-booting e2
 - **WDA_NOT_RUNNING** → WDA installed and running on 8100? `IOS_WDA_BUNDLE_ID` correct?
 - **IOS17_TUNNEL_FAILED** → iOS 17+ tunnel didn't start: on Windows check `wintun.dll`; or set `IOS_USE_GOIOS=0` and start the tunnel/WDA manually.
 - **Black screen** → try the `screenshot` provider; MJPEG needs WDA's MJPEG server (9100).
+- **No HEVC on iOS 18 / code 9021** → the phone returns `Remote control requires iOS 27.0 or later on this device. (code 9021)`. The tunnel and the display service can be present and the device still refuses the stream. Anything below iOS 27.0 stays on MJPEG. See [Why the documented iOS 17+ path does not start HEVC on 18.6](#why-the-documented-ios-17-path-does-not-start-hevc-on-186).
+- **Camera unavailable during HEVC** → `startmediastream` holds the remote-control media session, so the system keeps the camera locked; it is released when the view returns to MJPEG or screenshots.
 - **Re-login after restart** → `SECRET_KEY` not pinned (random key changes each boot); pin it to fix.
 - **Windows usbmux finds nothing** → install Apple Devices / iTunes (provides the Apple Mobile Device Service).
+
+## Acknowledgments
+
+Screen, tunnel, and control sit on these projects:
+
+- [**go-ios**](https://github.com/danielpaulus/go-ios) — the userspace RSD tunnel on iOS 17+, `runwda` to launch WDA, and the app and file commands.
+- [**pymobiledevice3**](https://github.com/doronz88/pymobiledevice3) — device discovery, usbmux, lockdown, developer-disk-image mounting, and the CoreDevice HEVC screen stream on iOS 27+.
+- [**WebDriverAgent**](https://github.com/appium/WebDriverAgent) — the on-device control and MJPEG server: taps, text, screenshots, and automation all go through it.
 
 ---
 

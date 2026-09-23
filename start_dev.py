@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -45,6 +46,25 @@ except (AttributeError, TypeError, ValueError):
 def _print(msg: str) -> None:
     with _PRINT_LOCK:
         print(f"[start_dev] {msg}", flush=True)
+
+
+def _wait_until_listening(port: int, proc: subprocess.Popen[Any], timeout: float = 90.0) -> bool:
+    """Block until something accepts TCP connections on ``port``.
+
+    Vite proxies to Flask immediately. Starting it before the backend binds
+    makes the browser's first /api and /socket.io calls fail with
+    ECONNREFUSED. ``proc`` exiting early means the wait should stop.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+                return True
+        except OSError:
+            time.sleep(0.15)
+    return False
 
 
 def _pids_on_port(port: int) -> list[str]:
@@ -404,6 +424,13 @@ def start_mode(args: argparse.Namespace) -> int:
     )
 
     backend = _start_process("backend", [sys.executable, str(backend_py)], ROOT, backend_env)
+    _print(f"waiting until the backend accepts connections on {BACKEND_PORT}...")
+    if not _wait_until_listening(BACKEND_PORT, backend):
+        rc = backend.poll()
+        raise RuntimeError(
+            f"backend did not start listening on {BACKEND_PORT}"
+            + (f" (exited {rc})" if rc is not None else " before the timeout")
+        )
 
     frontend_env = os.environ.copy()
     frontend_env["PYTHONUNBUFFERED"] = "1"
@@ -416,9 +443,11 @@ def start_mode(args: argparse.Namespace) -> int:
     )
 
     if not args.no_browser:
-        time.sleep(2.0)
-        with suppress(Exception):
-            webbrowser.open_new_tab(f"http://127.0.0.1:{FRONTEND_PORT}")
+        if _wait_until_listening(FRONTEND_PORT, frontend, timeout=30.0):
+            with suppress(Exception):
+                webbrowser.open_new_tab(f"http://127.0.0.1:{FRONTEND_PORT}")
+        else:
+            _print(f"frontend did not accept connections on {FRONTEND_PORT}; not opening a browser")
 
     _print("Ctrl+C to stop both.")
     try:

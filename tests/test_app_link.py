@@ -135,3 +135,75 @@ def test_admin_bypasses_reservation_gate(client):
     r = client.post("/api/devices/link-dev/tap", json={"x": 1, "y": 1})
     assert r.status_code != 403
     assert (r.get_json() or {}).get("code") != "RESERVATION_DENIED"
+
+
+def test_closed_werkzeug_websocket_does_not_return_an_empty_body():
+    from app import _WerkzeugClosedWebsocket
+
+    def bare(_environ, _start_response):
+        return []
+
+    wrapped = _WerkzeugClosedWebsocket(bare)
+    with pytest.raises(ConnectionAbortedError):
+        wrapped(
+            {"HTTP_UPGRADE": "websocket", "werkzeug.socket": object()},
+            lambda *_a, **_k: None,
+        )
+
+
+def test_http_and_started_websocket_pass_through():
+    from app import _WerkzeugClosedWebsocket
+
+    def started(environ, start_response):
+        start_response("200 OK", [])
+        return [b"ok"]
+
+    def forgotten(_environ, _start_response):
+        return []
+
+    wrapped = _WerkzeugClosedWebsocket(started)
+    seen = {}
+
+    def start(status, headers, exc_info=None):
+        seen["status"] = status
+
+    assert wrapped({"HTTP_UPGRADE": "websocket", "werkzeug.socket": object()}, start) == [b"ok"]
+    assert seen["status"] == "200 OK"
+    assert _WerkzeugClosedWebsocket(forgotten)({}, lambda *_a, **_k: None) == []
+
+
+def test_werkzeug_hides_socketio_polling():
+    import logging
+    import sys
+
+    from utils.logging_setup import setup_logging
+
+    setup_logging()
+    log = logging.getLogger("werkzeug")
+    polling = logging.LogRecord(
+        "werkzeug", logging.INFO, __file__, 1,
+        '127.0.0.1 - - "GET /socket.io/?EIO=4&transport=polling HTTP/1.1" 200 -',
+        (), None,
+    )
+    api = logging.LogRecord(
+        "werkzeug", logging.INFO, __file__, 1,
+        '127.0.0.1 - - "POST /api/auth/login HTTP/1.1" 200 -',
+        (), None,
+    )
+    assert not log.filter(polling)
+    assert log.filter(api)
+    root = logging.getLogger()
+    info = logging.LogRecord("app", logging.INFO, __file__, 1, "hello", (), None)
+    warning = logging.LogRecord("app", logging.WARNING, __file__, 1, "hello", (), None)
+    info_streams = [
+        handler.stream for handler in root.handlers
+        if getattr(handler, "stream", None) in (sys.stdout, sys.stderr)
+        and info.levelno >= handler.level and handler.filter(info)
+    ]
+    warning_streams = [
+        handler.stream for handler in root.handlers
+        if getattr(handler, "stream", None) in (sys.stdout, sys.stderr)
+        and warning.levelno >= handler.level and handler.filter(warning)
+    ]
+    assert info_streams == [sys.stdout]
+    assert warning_streams == [sys.stderr]

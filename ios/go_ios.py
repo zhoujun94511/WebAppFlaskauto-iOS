@@ -29,7 +29,12 @@ _log = get_logger(__name__)
 _ROOT = Path(__file__).resolve().parent.parent
 _RES = _ROOT / "resources"
 _IS_WIN = platform.system() == "Windows"
-# Userspace agent env — required for the no-admin tunnel on Windows.
+# Do not export this on commands we launch ourselves.
+# go-ios v1.0.207 calls tunnel.RunAgent() before parsing --tunnel-info-port
+# whenever ENABLE_GO_IOS_AGENT=user is set. RunAgent checks the default API
+# port (60105) and, if it is down, forks a second `tunnel start --userspace`
+# there. That second agent and the one we pin to 28100 both open lockdown on
+# the same phone and the session dies with EOF.
 _AGENT_ENV = {"ENABLE_GO_IOS_AGENT": "user"}
 
 
@@ -53,6 +58,14 @@ class GoIOS:
         self._bin: Optional[str] = None
         self._lock = threading.Lock()
 
+    def tunnel_info_args(self) -> List[str]:
+        """Point a go-ios command at the agent we already started.
+
+        Must be used without ``ENABLE_GO_IOS_AGENT``. With that variable set,
+        go-ios forks another agent on its default port before it reads this flag.
+        """
+        return ["--tunnel-info-port", str(self.tunnel_info_port)]
+
     # ── binary resolution ───────────────────────────────────────────
     @staticmethod
     def _os_key() -> str:
@@ -73,7 +86,7 @@ class GoIOS:
             flags = subprocess.CREATE_NO_WINDOW if _IS_WIN else 0
             cp = subprocess.run(
                 [path, "version"], capture_output=True, text=True, timeout=10,
-                creationflags=flags,
+                encoding="utf-8", errors="replace", creationflags=flags,
             )
             return cp.returncode == 0
         except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -264,9 +277,9 @@ class GoIOS:
     def syslog_popen(self, udid: str, parse: bool = True) -> subprocess.Popen:
         """Stream the device's live system log (``ios syslog``). Long-running →
         stdout is a line-buffered text PIPE the caller drains; the caller owns
-        the process lifecycle. iOS 17+ needs the userspace tunnel, so this runs
-        with the agent env (reusing an already-running tunnel from connect)."""
-        args = ["syslog"]
+        the process lifecycle. iOS 17+ reads the tunnel that connect already
+        started; point at its info port and do not spawn another agent."""
+        args = ["syslog", *self.tunnel_info_args()]
         if parse:
             args.append("--parse")  # go-ios formats the fields (verified --help)
         cmd = [self.binary()]
@@ -274,7 +287,6 @@ class GoIOS:
             cmd += ["--udid", udid]
         cmd += args
         env = os.environ.copy()
-        env.update(_AGENT_ENV)
         flags = (
             (subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
             if _IS_WIN else 0
@@ -390,7 +402,8 @@ class GoIOS:
         except OSError:
             pass
         code, out, err = self.run(
-            ["image", "auto", f"--basedir={cache}"], udid=udid, agent=True, timeout=int(timeout),
+            ["image", "auto", f"--basedir={cache}", *self.tunnel_info_args()],
+            udid=udid, agent=False, timeout=int(timeout),
         )
         blob = f"{out}\n{err}"
         low = blob.lower()
@@ -436,7 +449,7 @@ class GoIOS:
         # ``--env KEY=VALUE`` flags into the test runner.
         for k, v in (env or {}).items():
             args.append(f"--env={k}={v}")
-        # runwda is a dev service → needs the agent (tunnel) on the default
-        # info port, which TunnelManager has pinned to self.tunnel_info_port.
-        # log_file=True so a fast-failing launch leaves its reason on disk.
-        return self.popen(args, udid=udid, agent=True, log_file=True)
+        # runwda looks up the tunnel on --tunnel-info-port. Leave the agent
+        # env unset so go-ios does not fork a second tunnel on port 60105.
+        args += self.tunnel_info_args()
+        return self.popen(args, udid=udid, agent=False, log_file=True)

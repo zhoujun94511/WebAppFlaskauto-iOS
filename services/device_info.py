@@ -55,7 +55,10 @@ def _gather_inproc(udid: str) -> tuple[dict, dict, dict]:
     _read_errs = (PyMobileDevice3Exception, OSError, ValueError, KeyError)
 
     async def _run() -> tuple[dict, dict, dict]:
-        ld = await create_using_usbmux(serial=udid)
+        # autopair=False: a failed StartSession must not mint a new host
+        # certificate. pair() rewrites the pair record and drops the lockdown
+        # session the go-ios tunnel is opening at the same time.
+        ld = await create_using_usbmux(serial=udid, autopair=False)
         try:
             allv = dict(ld.all_values or {})
 

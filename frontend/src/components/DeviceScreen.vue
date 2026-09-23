@@ -6,8 +6,13 @@
     @pointercancel="onCancel"
     @dblclick.prevent="onDblClick"
   >
+    <canvas
+      v-if="hevc"
+      ref="mediaRef"
+      class="screen-img"
+    />
     <video
-      v-if="stream"
+      v-else-if="stream"
       ref="mediaRef"
       class="screen-img"
       autoplay
@@ -40,11 +45,15 @@ const props = defineProps({
   udid: { type: String, required: true },
   frame: { type: String, default: "" },
   stream: { type: Object, default: null }, // MediaStream (WebRTC) or null
+  hevc: { type: Boolean, default: false }, // WebCodecs canvas (native HEVC)
   rtcControl: { type: Function, default: null }, // send input over the RTC data channel
+  onMedia: { type: Function, default: null }, // receives the canvas/video/img element
 });
 
 const { tap, swipe, longPress, doubleTap } = useControl(props.udid);
 const mediaRef = ref(null);
+
+watch(mediaRef, (el) => props.onMedia?.(el), { immediate: true });
 
 // Bind the WebRTC MediaStream to the <video> whenever it (re)appears.
 watch(

@@ -84,6 +84,7 @@ class StreamSession:
                 misses += 1
                 if misses >= 30 or not self.provider.health():
                     _log.warning("stream %s provider unhealthy, stopping", self.udid)
+                    self.release()
                     _emit_safe(
                         "stream:error",
                         {"udid": self.udid, "code": "SCREEN_PROVIDER_FAILED",
@@ -115,12 +116,17 @@ class StreamSession:
                 self.udid,
             )
 
-    def stop(self) -> None:
+    def release(self) -> None:
+        """Close the provider socket without joining this session thread."""
         self._stop.set()
         with suppress(Exception):
             self.provider.stop()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2)
+
+    def stop(self) -> None:
+        self.release()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+            thread.join(timeout=2)
         _emit_safe("stream:stopped", {"udid": self.udid}, self.udid)
 
     def status(self) -> dict:
