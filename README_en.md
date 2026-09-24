@@ -1,6 +1,6 @@
-# Browser-based iOS Real-Device Mirroring & Control Platform
-
 <div align="center">
+
+# Browser-based iOS Real-Device Mirroring & Control Platform
 
 <img src="frontend/public/logo.svg" width="96" alt="WebAppFlaskauto-iOS logo" />
 
