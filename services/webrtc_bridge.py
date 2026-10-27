@@ -35,6 +35,11 @@ from utils.logging_setup import get_logger
 
 _log = get_logger(__name__)
 _VIDEO_CLOCK = 90000  # 90 kHz RTP video clock
+# ICE gathering sits between opening MJPEG and the first recv(). The phone
+# closes an unread stream in a few seconds, so the pump must already be
+# draining it. Reopen that stream before giving up on screenshots.
+_MJPEG_REOPENS = 3
+_SCREENSHOT_RETRY_S = 5.0
 
 
 def _even_dims(frame: "av.VideoFrame") -> "av.VideoFrame":
@@ -89,14 +94,18 @@ def _quiet_loop_exceptions(loop: asyncio.AbstractEventLoop, context: dict) -> No
 
 
 class JpegVideoTrack(MediaStreamTrack):
-    """A live video track fed by a JPEG ScreenProvider, with mid-stream
-    self-heal: if the provider dies (e.g. WDA's MJPEG socket drops) we swap to a
-    fresh provider (screenshot) WITHOUT tearing down the PeerConnection, so the
-    browser <video> keeps playing. Bounded by ``max_recovery``.
+    """A live video track fed by a JPEG ScreenProvider.
 
-    ``provider_factory(recover: bool)`` returns an UNSTARTED provider:
-    recover=False → preferred (MJPEG); recover=True → robust fallback
-    (screenshot). The track owns start()/stop()."""
+    A background pump starts reading as soon as the provider is open. WebRTC
+    ICE gathering happens after that and can take several seconds; an unread
+    WDA MJPEG socket is closed by the phone, and the track used to spend the
+    rest of the session on screenshot polling. The pump keeps only the newest
+    JPEG so that wait does not kill the stream. ``recv`` encodes that JPEG.
+
+    If the source still ends, MJPEG is reopened before any screenshot fallback.
+    Screenshot mode keeps trying to return to MJPEG. ``provider_factory(recover)``
+    returns an UNSTARTED provider: False is MJPEG, True is screenshot.
+    """
 
     kind = "video"
 
@@ -106,11 +115,23 @@ class JpegVideoTrack(MediaStreamTrack):
         self._factory = provider_factory
         self._max_recovery = max_recovery
         self._recoveries = 0
+        self._mjpeg_reopens = 0
+        self._using_screenshot = False
+        self._screenshot_since = 0.0
         self._provider: Optional[BaseScreenProvider] = initial
         self._decoder: Any = av.codec.CodecContext.create("mjpeg", "r")
         self._t0: Optional[float] = None
         self._last: Optional[av.VideoFrame] = None
-        self._misses = 0
+        self._state_lock = threading.Lock()
+        self._latest: Optional[bytes] = None
+        self._seq = 0
+        self._sent_seq = 0
+        self._pump_stop = threading.Event()
+        self._pump: Optional[threading.Thread] = None
+        self._source_dead = threading.Event()
+        self._pump_misses = 0
+        if self._provider is not None:
+            self._start_pump()
 
     def open_initial(self) -> None:
         """Open the first provider (MJPEG → screenshot). Raises if both fail —
@@ -122,60 +143,171 @@ class JpegVideoTrack(MediaStreamTrack):
             self._open(recover=False)
         except AppError:  # MJPEG open failed; try screenshot
             self._open(recover=True)
+            self._using_screenshot = True
+            self._screenshot_since = time.monotonic()
 
     def _open(self, recover: bool) -> None:
-        if self._provider is not None:
+        self._stop_pump()
+        old = self._provider
+        self._provider = None
+        if old is not None:
             with suppress(Exception):
-                self._provider.stop()
+                old.stop()
         provider = self._factory(recover)
         provider.start()  # opens MJPEG socket / warms screenshot; may raise
         self._provider = provider
         self._decoder = av.codec.CodecContext.create("mjpeg", "r")
-        self._misses = 0
+        self._pump_misses = 0
+        self._source_dead.clear()
+        with self._state_lock:
+            self._latest = None
+        self._start_pump()
+
+    def _start_pump(self) -> None:
+        self._pump_stop.clear()
+        self._pump = threading.Thread(
+            target=self._pump_loop, name="webrtc-jpeg-pump", daemon=True,
+        )
+        self._pump.start()
+
+    def _stop_pump(self) -> None:
+        self._pump_stop.set()
+        thread = self._pump
+        if (
+            thread is not None
+            and thread is not threading.current_thread()
+            and thread.is_alive()
+        ):
+            thread.join(timeout=2)
+        self._pump = None
+        self._pump_stop.clear()
+
+    def _pump_loop(self) -> None:
+        """Drain the provider so the socket stays alive before ``recv`` runs."""
+        while not self._pump_stop.is_set():
+            provider = self._provider
+            if provider is None:
+                break
+            jpeg = provider.read_frame()
+            if self._pump_stop.is_set():
+                break
+            if jpeg:
+                self._pump_misses = 0
+                with self._state_lock:
+                    self._latest = jpeg
+                    self._seq += 1
+                continue
+            if provider.health() and self._pump_misses < 30:
+                self._pump_misses += 1
+                time.sleep(0.02)
+                continue
+            _log.warning(
+                "webrtc source stopped after %d frame(s): provider=%s healthy=%s",
+                self._seq, getattr(provider, "name", "?"), provider.health(),
+            )
+            self._source_dead.set()
+            break
+
+    def _copy_latest(self) -> tuple[Optional[bytes], int]:
+        with self._state_lock:
+            return self._latest, self._seq
+
+    def _decode(self, jpeg: bytes) -> Optional[av.VideoFrame]:
+        try:
+            decoded = self._decoder.decode(av.packet.Packet(jpeg))
+        except FFmpegError:
+            return None
+        return decoded[0] if decoded else None
+
+    def _heal_sync(self) -> None:
+        name = getattr(self._provider, "name", "?")
+        frames = self._seq
+        self._source_dead.clear()
+        if name != "screenshot" and self._mjpeg_reopens < _MJPEG_REOPENS:
+            self._mjpeg_reopens += 1
+            _log.info(
+                "webrtc track reopening MJPEG (%d/%d) after %d frame(s), previous=%s",
+                self._mjpeg_reopens, _MJPEG_REOPENS, frames, name,
+            )
+            try:
+                self._open(False)
+                return
+            except AppError as exc:
+                _log.warning(
+                    "webrtc MJPEG reopen failed after %d frame(s): %s", frames, exc.code,
+                )
+        self._recoveries += 1
+        if self._recoveries > self._max_recovery:
+            raise MediaStreamError("screen provider permanently unavailable")
+        _log.info(
+            "webrtc track self-heal: swapping to screenshot provider (%d/%d) after %d frame(s)",
+            self._recoveries, self._max_recovery, frames,
+        )
+        self._open(True)
+        self._using_screenshot = True
+        self._screenshot_since = time.monotonic()
+
+    def _attempt_mjpeg_return(self) -> None:
+        """Screenshot mode is the last resort. Try the MJPEG socket again."""
+        self._screenshot_since = time.monotonic()
+        try:
+            provider = self._factory(False)
+            provider.start()
+        except AppError as exc:
+            _log.info("webrtc MJPEG not ready yet, staying on screenshot: %s", exc.code)
+            return
+        self._stop_pump()
+        old = self._provider
+        self._provider = provider
+        self._using_screenshot = False
+        self._mjpeg_reopens = 0
+        self._source_dead.clear()
+        self._decoder = av.codec.CodecContext.create("mjpeg", "r")
+        with self._state_lock:
+            self._latest = None
+        self._start_pump()
+        if old is not None:
+            with suppress(Exception):
+                old.stop()
+        _log.info("webrtc track returned to MJPEG")
 
     async def recv(self) -> av.VideoFrame:
-        # Produce the next frame to encode. We loop until we actually have one,
-        # rather than handing aiortc a degenerate placeholder: aiortc opens
-        # libx264 lazily on the first frame, so a bogus first frame would open
-        # the encoder at the wrong size. Before the first real frame we keep
-        # waiting; after it, we reuse the last good frame as filler when the
-        # provider briefly starves. The returned frame is normalized to even
-        # dimensions (see _even_dims) — odd width/height breaks libx264 open.
+        # Produce the next frame to encode. The pump, not this call, reads the
+        # provider — ICE gathering must not leave the MJPEG socket idle.
+        # libx264 opens on the first real frame, so wait for one instead of
+        # inventing a placeholder. After that, a brief gap repeats the last frame.
         frame: Optional[av.VideoFrame] = None
+        waited = 0.0
         while frame is None:
-            # read_frame() blocks until the next JPEG — run it off the event loop
-            # so we don't stall other peers. This also paces us to device fps.
-            jpeg = await asyncio.to_thread(self._provider.read_frame)
-            if jpeg:
-                self._misses = 0
+            if (
+                self._using_screenshot
+                and time.monotonic() - self._screenshot_since >= _SCREENSHOT_RETRY_S
+            ):
+                await asyncio.to_thread(self._attempt_mjpeg_return)
+                self._sent_seq = 0
+            jpeg, seq = self._copy_latest()
+            if jpeg is not None and seq != self._sent_seq:
+                self._sent_seq = seq
+                frame = self._decode(jpeg)
+                waited = 0.0
+                if frame is None:
+                    continue
+            elif self._source_dead.is_set():
                 try:
-                    decoded = self._decoder.decode(av.packet.Packet(jpeg))
-                    if decoded:
-                        frame = decoded[0]
-                except FFmpegError:
-                    pass
-            elif self._misses < 30 and self._provider.health():
-                self._misses += 1
-                await asyncio.sleep(0.02)
-            elif self._recoveries < self._max_recovery:
-                # Provider died mid-stream — swap to the screenshot fallback and
-                # keep the PeerConnection alive (no renegotiation, no drop).
-                self._recoveries += 1
-                _log.info("webrtc track self-heal: swapping to screenshot provider (%d/%d)",
-                          self._recoveries, self._max_recovery)
-                try:
-                    await asyncio.to_thread(self._open, True)
-                except Exception as exc:  # noqa: BLE001
+                    await asyncio.to_thread(self._heal_sync)
+                except MediaStreamError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — keep the PC, try again
                     _log.warning("webrtc track recover failed: %s", exc)
+                    self._source_dead.set()
                     await asyncio.sleep(0.5)
-            else:
-                raise MediaStreamError("screen provider permanently unavailable")
-            # Once we've emitted at least one real frame, a momentary miss reuses
-            # the last good frame (keeps fps up, correct size). Before that, the
-            # loop keeps polling — we'd rather make aiortc wait than open the
-            # encoder on a bogus size.
-            if frame is None and self._last is not None:
+                self._sent_seq = 0
+                waited = 0.0
+            elif self._last is not None and waited >= 0.2:
                 frame = self._last
+            else:
+                await asyncio.sleep(0.02)
+                waited += 0.02
         # Normalize to even dimensions BEFORE the encoder ever sees the frame.
         # libx264/yuv420p rejects odd width/height (several iPhones report odd
         # pixel widths, e.g. 1179) — without this the very first encode fails at
@@ -190,6 +322,7 @@ class JpegVideoTrack(MediaStreamTrack):
 
     def stop(self) -> None:  # noqa: D401
         super().stop()
+        self._stop_pump()
         with suppress(Exception):
             if self._provider is not None:
                 self._provider.stop()

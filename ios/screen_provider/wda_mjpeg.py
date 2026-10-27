@@ -110,15 +110,18 @@ class WdaMjpegProvider(BaseScreenProvider):
                 chunk = next(self._iter)
                 if not chunk:
                     self._healthy = False
+                    self._log_ended("empty chunk")
                     return None
                 self._buf.extend(chunk)
                 # Guard against unbounded growth on a malformed stream.
                 if len(self._buf) > 8 * 1024 * 1024:
                     self._buf.clear()
                     self._healthy = False
+                    self._log_ended("buffer exceeded 8MB")
                     return None
         except StopIteration:
             self._healthy = False
+            self._log_ended("server closed the stream")
             return None
         except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
             self._healthy = False
@@ -135,6 +138,11 @@ class WdaMjpegProvider(BaseScreenProvider):
                 self._frames, type(exc).__name__, exc, exc_info=True,
             )
             return None
+
+    def _log_ended(self, reason: str) -> None:
+        if self._stopping:
+            return
+        _log.warning("MJPEG stream ended after %d frame(s): %s", self._frames, reason)
 
     def stop(self) -> None:
         self._stopping = True  # tell the reader the upcoming close is intentional
